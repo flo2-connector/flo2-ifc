@@ -1,0 +1,50 @@
+name: dependencies
+
+# Every MCP server Anthony runs has its dependencies reviewed and updated
+# monthly. This is that review's first half: a dated report of every pin in
+# pyproject.toml, every GitHub Action, and the Agent Plugins schema, against
+# their latest releases (tools/dependency_currency.py, which says what fails and
+# what only reports). The second half is a person or agent reading the report
+# and moving the pins it names, each in its own pull request.
+#
+# - MONTHLY: the schedule below, on the first of the month.
+# - ON DEMAND: workflow_dispatch.
+# - ON EVERY PULL REQUEST that moves a pin, a hold, a workflow or the checker.
+
+on:
+  schedule:
+    - cron: "0 6 1 * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "pyproject.toml"
+      - "dependency-holds.toml"
+      - ".github/workflows/**"
+      - "tools/**"
+
+permissions:
+  contents: read
+
+jobs:
+  currency:
+    name: dependency currency (PyPI pins, the fork pin, Actions, Agent Plugins schema)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Report every dependency against its latest release
+        env:
+          # Raises the GitHub API's rate limit for the Actions, fork and spec lookups. Read-only.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tools/dependency_currency.py --json "dependency-report-$(date -u +%F).json"
+      - name: Keep the dated report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-report
+          path: dependency-report-*.json
+          if-no-files-found: warn
+          retention-days: 90

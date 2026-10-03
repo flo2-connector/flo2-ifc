@@ -1,0 +1,20 @@
+# Dependencies held back ON PURPOSE, each with its reason and a date to look again.
+#
+# Every MCP server Anthony runs has its dependencies reviewed and updated monthly.
+# tools/dependency_currency.py reads this file. Anything a new major (or a new 0.x
+# minor) behind, with no entry here, fails the `dependencies` workflow. So does an
+# entry whose look_again date has passed, and an entry with no reason. An entry for
+# something that is no longer behind is reported: remove it when its bump lands.
+#
+#   kind       = "package" | "action" | "schema"
+#   name       = the PyPI name, the action's owner/repo, or "agent-plugins"
+#   reason     = why, in a sentence somebody else can check
+#   look_again = a date (YYYY-MM-DD) after which this hold stops counting
+#
+# For example (not a real hold):
+#
+# [[hold]]
+# kind = "package"
+# name = "ifcopenshell"
+# reason = "0.10.0 changes ifc5d's base-quantities rule; flo2 re-measures its sample models before moving."
+# look_again = 2026-11-01
