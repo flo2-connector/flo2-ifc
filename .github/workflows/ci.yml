@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: package (Python 3.12, the pinned set)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # Installs exactly pyproject.toml's pins, ifcmcp from the fork's commit
+      # included, with the test extra (pytest, jsonschema).
+      - run: python -m pip install --disable-pip-version-check ".[test]"
+      - run: python -m pip freeze --all
+      - run: python -m pytest -v
+
+  image:
+    name: image (confined as flo2 runs it)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the image
+        run: docker build -t flo2-ifc:ci .
+      - name: It answers --version with no network, a read-only root and an unprivileged user
+        run: docker run --rm --network none --read-only --cap-drop ALL --user 65534:65534 flo2-ifc:ci --version
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check ".[test]"
+      # The smoke test's own questions (initialize, the 25 tools, ifc_new then
+      # ifc_summary), asked of the image under flo2-tool-sandbox's flags, with
+      # a folder mounted read-only at /design.
+      - name: It serves its 25 tools over stdio, confined like flo2's slot
+        env:
+          FLO2_IFC_SERVER: >-
+            docker run --rm -i --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m
+            --memory 1g --memory-swap 1g --cpus 1 --pids-limit 64
+            --cap-drop ALL --security-opt no-new-privileges --user 65534:65534
+            --mount type=bind,source=${{ github.workspace }}/tests,target=/design,readonly
+            flo2-ifc:ci
+        run: python -m pytest -v tests/test_smoke.py

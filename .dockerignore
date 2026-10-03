@@ -1,0 +1,7 @@
+# The image is built from pyproject.toml, README.md (its readme), LICENSE and src/ only.
+*
+!pyproject.toml
+!README.md
+!LICENSE
+!src/
+src/**/__pycache__
