@@ -1,0 +1,16 @@
+plugin.schema.json and mcp.schema.json are unmodified copies of the Agent
+Plugins 1.0.0 schemas, schemas/1.0.0/ in the specification's repository:
+
+  repository  https://github.com/agentplugins/agent-plugins-spec
+  commit      ff8ab5e392cc87bd88d87c060815a87490e51003 (main, 2026-08-19)
+  copied      2026-10-03
+
+They are byte-identical to the same files at the v1.0.0 tag
+(bd383552095128f6effe895b9257cfd580a6d179). Their $id is
+https://agent-plugins.org/schemas/1.0.0/..., the $schema that plugin.json and
+mcp.json at the root of this repository declare.
+
+tests/test_manifests.py validates both root manifests against these copies,
+so the tests need no network. When the manifests move to a newer schema
+version (tools/dependency_currency.py reports one), copy that version's two
+files here and update this note.

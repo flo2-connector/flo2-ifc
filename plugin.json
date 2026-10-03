@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "flo2-ifc",
+  "version": "0.1.0",
+  "description": "IfcOpenShell's ifcmcp, the MCP server for IFC building models, on the MCP Python SDK 2.x: load, query, edit, validate, quantify and plot a building model, with every dependency pinned to the set flo2.io runs.",
+  "author": {
+    "name": "Anthony Sligar"
+  },
+  "homepage": "https://github.com/sligara7/flo2-ifc",
+  "repository": "https://github.com/sligara7/flo2-ifc",
+  "license": "Apache-2.0",
+  "keywords": ["ifc", "bim", "building", "ifcopenshell", "ifcmcp", "mcp"]
+}
