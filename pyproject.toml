@@ -24,7 +24,7 @@ dependencies = [
   # branch ifcmcp/mcp-python-sdk-2. Every ifcopenshell-mcp on PyPI so far
   # requires mcp<2. The [mcp] extra makes the resolver hold mcp to the range
   # the fork itself declares (>=2,<3).
-  "ifcopenshell-mcp[mcp] @ git+https://github.com/sligara7/IfcOpenShell@a2bada6699aaf2e0926ed07b9a97e51a70e1ddfb#subdirectory=src/ifcmcp",
+  "ifcopenshell-mcp[mcp] @ git+https://github.com/sligara7/IfcOpenShell@0ea3edc7a38d08c4c40918201357bd637fdaa39d#subdirectory=src/ifcmcp",
   "mcp==2.3.0",
   # ifcmcp leaves its helpers unpinned, and they decide what a model can measure.
   "ifcopenshell==0.9.0",

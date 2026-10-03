@@ -22,9 +22,10 @@ Anthony's fork of IfcOpenShell:
 
 - repository: [sligara7/IfcOpenShell](https://github.com/sligara7/IfcOpenShell)
 - branch: `ifcmcp/mcp-python-sdk-2`
-- commit: `a2bada6699aaf2e0926ed07b9a97e51a70e1ddfb`
+- commit: `0ea3edc7a38d08c4c40918201357bd637fdaa39d`
 
-There, 71 of 71 ifcmcp tests pass on mcp 2.3.0.
+There, 74 of 74 ifcmcp tests pass on mcp 2.3.0. A failing tool still tells the agent why: the port raises the SDK's
+`ToolError`, whose text MCPServer passes on (any other exception reaches the agent as a bare "Error executing tool").
 
 **The fork stays whole: a copy of IfcOpenShell plus that port, and nothing else.** Everything flo2 needs lives here
 instead: the pins, the image, the plugin, the CI and the dependency check. That keeps two things clean:
@@ -56,7 +57,7 @@ Every dependency is pinned exactly in `pyproject.toml`. That list is the set flo
 
 | Pin | Why |
 |---|---|
-| `ifcopenshell-mcp[mcp] @ git+https://github.com/sligara7/IfcOpenShell@a2bada6…#subdirectory=src/ifcmcp` | ifcmcp on the MCP Python SDK 2.x, from the fork. The `[mcp]` extra makes the resolver hold mcp to the range the fork declares (`>=2,<3`). |
+| `ifcopenshell-mcp[mcp] @ git+https://github.com/sligara7/IfcOpenShell@0ea3edc…#subdirectory=src/ifcmcp` | ifcmcp on the MCP Python SDK 2.x, from the fork. The `[mcp]` extra makes the resolver hold mcp to the range the fork declares (`>=2,<3`). |
 | `mcp==2.3.0` | The latest official MCP Python SDK. |
 | `ifcopenshell==0.9.0`, `ifcquery==0.9.0`, `ifcedit==0.9.0`, `ifc5d==0.9.0` | ifcmcp leaves these unpinned, and they decide what a model can measure. For example, with ifc5d 0.9.0 the base-quantities rule measures a room modelled as a plain box; with 0.8.5 it skips the room without saying so. |
 | `networkx==3.7` | Without it, `ifcedit list` prints a "Note: API not available" line to stdout ahead of its JSON. |

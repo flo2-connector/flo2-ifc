@@ -71,6 +71,8 @@ async def round_trip() -> dict:
             out["tools"] = [t.name for t in tools.tools]
             out["new"] = text_of(await session.call_tool("ifc_new", {"schema": "IFC4"}))
             out["summary"] = text_of(await session.call_tool("ifc_summary", {}))
+            missing = await session.call_tool("ifc_info", {"element_id": 999999})
+            out["missing"] = (missing.is_error, "".join(getattr(b, "text", "") for b in missing.content))
     return out
 
 
@@ -98,3 +100,10 @@ def test_ifc_new_then_ifc_summary_answer(served):
     assert new.get("schema") == "IFC4", new
     summary = json.loads(served["summary"])
     assert summary.get("schema") == "IFC4", summary
+
+
+def test_a_failing_tool_says_why(served):
+    # mcp 2.x hides the text of any exception but ToolError; the fork's port raises ToolError.
+    is_error, text = served["missing"]
+    assert is_error
+    assert "#999999" in text, text
