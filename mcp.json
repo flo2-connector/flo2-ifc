@@ -4,7 +4,7 @@
     "ifc": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/sligara7/flo2-ifc", "flo2-ifc"]
+      "args": ["--from", "git+https://github.com/flo2-connector/flo2-ifc", "flo2-ifc"]
     }
   }
 }

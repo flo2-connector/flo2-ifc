@@ -43,8 +43,8 @@ test = ["pytest==9.1.1", "jsonschema==4.26.0"]
 flo2-ifc = "flo2_ifc:main"
 
 [project.urls]
-Homepage = "https://github.com/sligara7/flo2-ifc"
-Repository = "https://github.com/sligara7/flo2-ifc"
+Homepage = "https://github.com/flo2-connector/flo2-ifc"
+Repository = "https://github.com/flo2-connector/flo2-ifc"
 
 [tool.setuptools.packages.find]
 where = ["src"]
