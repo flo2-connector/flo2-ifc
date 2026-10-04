@@ -34,10 +34,16 @@ dependencies = [
   # Without networkx, `ifcedit list` prints "Note: API not available" to stdout
   # ahead of its JSON.
   "networkx==3.7",
+  # ifc_validate's express_rules runs IfcOpenShell's rule executor, which
+  # imports pytest's assertion rewriting (ifcopenshell/express/rule_executor.py,
+  # `from _pytest import assertion`). Without pytest, that check fails with
+  # "No module named '_pytest'", and flo2's model door offers it.
+  "pytest==9.1.1",
 ]
 
 [project.optional-dependencies]
-test = ["pytest==9.1.1", "jsonschema==4.26.0"]
+# pytest is a runtime dependency above, so the test extra adds only jsonschema.
+test = ["jsonschema==4.26.0"]
 
 [project.scripts]
 flo2-ifc = "flo2_ifc:main"
