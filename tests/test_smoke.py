@@ -71,6 +71,8 @@ async def round_trip() -> dict:
             out["tools"] = [t.name for t in tools.tools]
             out["new"] = text_of(await session.call_tool("ifc_new", {"schema": "IFC4"}))
             out["summary"] = text_of(await session.call_tool("ifc_summary", {}))
+            validated = await session.call_tool("ifc_validate", {"express_rules": True})
+            out["validate"] = (validated.is_error, "".join(getattr(b, "text", "") for b in validated.content))
             missing = await session.call_tool("ifc_info", {"element_id": 999999})
             out["missing"] = (missing.is_error, "".join(getattr(b, "text", "") for b in missing.content))
     return out
@@ -107,3 +109,11 @@ def test_a_failing_tool_says_why(served):
     is_error, text = served["missing"]
     assert is_error
     assert "#999999" in text, text
+
+
+def test_express_rule_validation_runs(served):
+    # IfcOpenShell's rule executor imports pytest; without it this fails with
+    # "No module named '_pytest'".
+    is_error, text = served["validate"]
+    assert not is_error, text
+    assert "_pytest" not in text, text

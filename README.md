@@ -61,7 +61,8 @@ Every dependency is pinned exactly in `pyproject.toml`. That list is the set flo
 | `mcp==2.3.0` | The latest official MCP Python SDK. |
 | `ifcopenshell==0.9.0`, `ifcquery==0.9.0`, `ifcedit==0.9.0`, `ifc5d==0.9.0` | ifcmcp leaves these unpinned, and they decide what a model can measure. For example, with ifc5d 0.9.0 the base-quantities rule measures a room modelled as a plain box; with 0.8.5 it skips the room without saying so. |
 | `networkx==3.7` | Without it, `ifcedit list` prints a "Note: API not available" line to stdout ahead of its JSON. |
-| `pytest==9.1.1`, `jsonschema==4.26.0` (the `test` extra) | The tests. |
+| `pytest==9.1.1` | `ifc_validate`'s `express_rules` runs IfcOpenShell's rule executor, which imports pytest's assertion rewriting (`ifcopenshell/express/rule_executor.py`). Without it that check fails with "No module named '_pytest'". The tests use it too. |
+| `jsonschema==4.26.0` (the `test` extra) | The manifest tests. |
 | `setuptools==84.0.0` (build) | The build backend, so this package builds the same way every time. |
 
 Some things are deliberately left out:
