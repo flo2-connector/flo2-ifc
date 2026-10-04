@@ -119,13 +119,13 @@ that, uv's cache makes it quick.
 The server command in both is:
 
 ```sh
-uvx --from git+https://github.com/sligara7/flo2-ifc flo2-ifc
+uvx --from git+https://github.com/flo2-connector/flo2-ifc flo2-ifc
 ```
 
 **By hand**, in any MCP client's config:
 
 ```json
-{"mcpServers": {"ifc": {"command": "uvx", "args": ["--from", "git+https://github.com/sligara7/flo2-ifc", "flo2-ifc"]}}}
+{"mcpServers": {"ifc": {"command": "uvx", "args": ["--from", "git+https://github.com/flo2-connector/flo2-ifc", "flo2-ifc"]}}}
 ```
 
 **From a checkout:**

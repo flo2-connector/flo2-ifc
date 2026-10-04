@@ -6,8 +6,8 @@
   "author": {
     "name": "Anthony Sligar"
   },
-  "homepage": "https://github.com/sligara7/flo2-ifc",
-  "repository": "https://github.com/sligara7/flo2-ifc",
+  "homepage": "https://github.com/flo2-connector/flo2-ifc",
+  "repository": "https://github.com/flo2-connector/flo2-ifc",
   "license": "Apache-2.0",
   "keywords": ["ifc", "bim", "building", "ifcopenshell", "ifcmcp", "mcp"]
 }

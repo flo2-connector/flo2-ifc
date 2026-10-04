@@ -19,7 +19,7 @@ REPO = Path(__file__).resolve().parent.parent
 SCHEMAS = Path(__file__).resolve().parent / "schemas"
 SERVER = "ifc"
 COMMAND = "uvx"
-ARGS = ["--from", "git+https://github.com/sligara7/flo2-ifc", "flo2-ifc"]
+ARGS = ["--from", "git+https://github.com/flo2-connector/flo2-ifc", "flo2-ifc"]
 
 
 def load(rel: str) -> dict:
@@ -62,7 +62,7 @@ def test_both_plugin_manifests_say_the_same_thing():
     assert agent["name"] == project["name"]
     assert agent["version"] == project["version"]
     assert agent["author"] == {"name": "Anthony Sligar"}
-    assert agent["homepage"] == agent["repository"] == "https://github.com/sligara7/flo2-ifc"
+    assert agent["homepage"] == agent["repository"] == "https://github.com/flo2-connector/flo2-ifc"
     assert agent["license"] == project["license"] == "Apache-2.0"
     assert (REPO / "LICENSE").read_text().lstrip().startswith("Apache License\n")
 

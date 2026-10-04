@@ -58,7 +58,7 @@ REPO = Path(__file__).resolve().parent.parent
 HOLDS = "dependency-holds.toml"
 MANIFESTS = ("plugin.json", "mcp.json")
 SPEC_REPO = "agentplugins/agent-plugins-spec"
-USER_AGENT = "flo2-ifc-dependency-currency (github.com/sligara7/flo2-ifc)"
+USER_AGENT = "flo2-ifc-dependency-currency (github.com/flo2-connector/flo2-ifc)"
 
 FAILING = ("series_owed", "hold_expired", "hold_invalid", "unknown", "unpinned")
 ORDER = ("series_owed", "hold_expired", "hold_invalid", "unknown", "unpinned", "return_to_pypi",
