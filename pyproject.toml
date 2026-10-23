@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flo2-ifc"
-version = "0.1.0"
+version = "0.2.0"
 description = "The exact ifcmcp set flo2.io runs: IfcOpenShell's MCP server for IFC building models, on the MCP Python SDK 2.x, pinned."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -39,6 +39,11 @@ dependencies = [
   # `from _pytest import assertion`). Without pytest, that check fails with
   # "No module named '_pytest'", and flo2's model door offers it.
   "pytest==9.1.1",
+  # flo2-ifc's extent reader (src/flo2_ifc/reading.py) takes each shape's
+  # vertices as a numpy array. ifcopenshell already requires numpy; flo2-ifc
+  # imports it itself, so it is pinned here, at the version ifcopenshell
+  # 0.9.0 resolves to.
+  "numpy==2.5.4",
 ]
 
 [project.optional-dependencies]
