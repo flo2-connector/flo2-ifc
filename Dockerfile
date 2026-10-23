@@ -1,4 +1,5 @@
-# IfcOpenShell's ifcmcp, as the image flo2-tool-sandbox runs one container of
+# IfcOpenShell's ifcmcp with flo2-ifc's readers for a whole building
+# (src/flo2_ifc), as the image flo2-tool-sandbox runs one container of
 # per person's session on a design (dec:idea-a-private-worker-droplet-runs-
 # tool-servers-like-ifcmcp, settled 2026-10-02). flo2 builds it from this file
 # at a pinned commit of this repository, as it builds flo2-cad's.
@@ -38,7 +39,10 @@ RUN python -m venv /opt/flo2-ifc \
 FROM python:3.12-slim
 COPY --from=build /opt/flo2-ifc /opt/flo2-ifc
 ENV PATH=/opt/flo2-ifc/bin:$PATH HOME=/tmp PYTHONDONTWRITEBYTECODE=1
-RUN ifcmcp --version
+# The entry point is flo2-ifc: ifcmcp's server with the readers in front of
+# seven of its tools and two added (since flo2-ifc 0.2.0). `ifcmcp` alone,
+# also on PATH, is the fork's server without them.
+RUN flo2-ifc --version && ifcmcp --version
 USER 65534:65534
 WORKDIR /tmp
-ENTRYPOINT ["ifcmcp"]
+ENTRYPOINT ["flo2-ifc"]
