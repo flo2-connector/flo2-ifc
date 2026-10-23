@@ -600,7 +600,8 @@ class _Window(ifcopenshell.file):
                 self.first_seen = True
                 if self.on_first:
                     self.on_first()
-            if time.monotonic() > self._deadline:
+            # At least one instance a call, so a check always moves on.
+            if self.reached > self._start and time.monotonic() > self._deadline:
                 return
             yield inst
             self.reached += 1

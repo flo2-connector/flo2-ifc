@@ -254,6 +254,13 @@ def test_validate_finds_an_error_in_a_later_window_and_a_duplicate_globalid_anyw
     assert any("IfcRoot.UR1" in i["message"] for i in late["issues"])
 
 
+def test_validate_moves_on_by_at_least_one_instance_a_call(house):
+    v = R.validate(house, seconds=0)
+    assert v["checked"]["to"] == 1 and v["next_start"] == 1
+    v = R.validate(house, start=1, seconds=0)
+    assert v["checked"] == {"from": 1, "to": 2, "of": v["checked"]["of"]}
+
+
 def test_validate_leaves_ifcopenshells_feature_switch_as_it_found_it(big):
     import ifcopenshell
 
