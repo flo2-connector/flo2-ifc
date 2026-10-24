@@ -158,3 +158,37 @@ def measured_site(schema: str = "IFC4") -> ifcopenshell.file:
     one = run("grid.create_grid_axis", f, grid=grid, axis_tag="1", uvw_axes="VAxes")
     one.AxisCurve = f.createIfcPolyline([f.createIfcCartesianPoint((-2000.0, 1000.0)), f.createIfcCartesianPoint((14000.0, 1000.0))])
     return f
+
+
+def rooms_on_a_floor(rooms: list[tuple[str, tuple[float, float, float, float]]], schema: str = "IFC4") -> ifcopenshell.file:
+    """One storey, "Level 1", with a floor slab 12 x 6 m and the rooms given,
+    each as (name, (x0, y0, x1, y1)) in metres, 2.7 m tall: a room may lie
+    inside another, as a zone is traced inside the room that holds it."""
+    run = ifcopenshell.api.run
+    f = run("project.create_file", version=schema)
+    project = run("root.create_entity", f, ifc_class="IfcProject", name="Rooms")
+    mm = run("unit.add_si_unit", f, unit_type="LENGTHUNIT", prefix="MILLI")
+    m2 = run("unit.add_si_unit", f, unit_type="AREAUNIT")
+    run("unit.assign_unit", f, units=[mm, m2])
+    model3d = run("context.add_context", f, context_type="Model")
+    body = run("context.add_context", f, context_type="Model", context_identifier="Body", target_view="MODEL_VIEW", parent=model3d)
+    site = run("root.create_entity", f, ifc_class="IfcSite", name="Site")
+    bldg = run("root.create_entity", f, ifc_class="IfcBuilding", name="Building")
+    level = run("root.create_entity", f, ifc_class="IfcBuildingStorey", name="Level 1")
+    level.Elevation = 0.0
+    run("aggregate.assign_object", f, relating_object=project, products=[site])
+    run("aggregate.assign_object", f, relating_object=site, products=[bldg])
+    run("aggregate.assign_object", f, relating_object=bldg, products=[level])
+    for p in (site, bldg, level):
+        _place(f, p)
+    slab = run("root.create_entity", f, ifc_class="IfcSlab", name="Floor slab")
+    run("geometry.assign_representation", f, product=slab, representation=run("geometry.add_slab_representation", f, context=body, depth=0.2, polyline=[(0, 0), (12, 0), (12, 6), (0, 6)]))
+    _place(f, slab, z=-0.2)
+    run("spatial.assign_container", f, relating_structure=level, products=[slab])
+    for name, (x0, y0, x1, y1) in rooms:
+        space = run("root.create_entity", f, ifc_class="IfcSpace", name=name)
+        run("aggregate.assign_object", f, relating_object=level, products=[space])
+        rep = run("geometry.add_slab_representation", f, context=body, depth=2.7, polyline=[(0, 0), (x1 - x0, 0), (x1 - x0, y1 - y0), (0, y1 - y0)])
+        run("geometry.assign_representation", f, product=space, representation=rep)
+        _place(f, space, x=x0, y=y0, z=0.0)
+    return f

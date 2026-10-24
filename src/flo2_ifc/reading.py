@@ -1,9 +1,9 @@
 """Reading a whole building model within one reply and one call's time.
 
 ifcmcp answers a question about a small model in full. A real building is not
-small: the first Revit export flo2 read (IFC4, 165,111 entities, 2026-10-23)
-gave a storey's relations as 167,000 characters, its spatial tree as 230,000,
-and took 105 s to validate. A chat can take about 29,000 characters in one
+small: a large building model flo2 read (2026-10-23) gave a storey's
+relations as over 150,000 characters, its spatial tree as over 200,000, and
+took over 100 s to validate. A chat can take about 29,000 characters in one
 reply and stops waiting at about 60 s. So each reader here:
 
 - pages: it lists at most ``limit`` items and at most ``PAGE_CHARS`` characters,
@@ -41,7 +41,7 @@ import ifcopenshell.util.unit
 PAGE_CHARS = int(os.environ.get("FLO2_IFC_PAGE_CHARS", "20000"))
 #: Seconds one call may spend measuring or checking before it stops and says
 #: what it reached. A chat stops waiting at about 60 s, and the first call of a
-#: session also opens the model (5 s for 165k entities on a laptop).
+#: session also opens the model (about 5 s for a large model on a laptop).
 SECONDS = float(os.environ.get("FLO2_IFC_SECONDS", "30"))
 #: Items one listing gives when the caller names no limit.
 DEFAULT_LIMIT = 100
@@ -314,9 +314,9 @@ def tree(model: ifcopenshell.file, storey: str = "", element_type: str = "", off
 def select(model: ifcopenshell.file, query: str, offset: int = 0, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
     """Elements an IfcOpenShell selector matches, sorted by id, a page at a time.
 
-    The selector also filters by place: ``IfcDoor, location = "1ST FLR"`` is
-    the doors on the storey named 1ST FLR (a storey, a space or a building, by
-    its name), and ``IfcWall, IfcDoor, location = "2ND FLR"`` both kinds on it.
+    The selector also filters by place: ``IfcDoor, location = "Level 1"`` is
+    the doors on the storey named Level 1 (a storey, a space or a building, by
+    its name), and ``IfcWall, IfcDoor, location = "Level 2"`` both kinds on it.
     """
     offset, limit = _check_page(offset, limit)
     found = sorted(ifcopenshell.util.selector.filter_elements(model, query), key=lambda e: e.id())
@@ -432,20 +432,20 @@ def _geometry_settings():
     s = ifcopenshell.geom.settings()
     s.set("use-world-coords", True)
     # An opening only removes material, so subtracting it cannot widen a box;
-    # skipping it saves the boolean work (230 openings in the Wetmore model).
+    # skipping it saves the boolean work (a large model has hundreds of openings).
     s.set("disable-opening-subtractions", True)
     return s
 
 
-#: IfcOpenShell's geometry library for meshes. Measured on the 165k-entity
-#: model, one thread: its 84 doors took 86 s with the default library and
-#: 1.8 s with this one; the whole model, 25 s.
+#: IfcOpenShell's geometry library for meshes. Measured on a large model, one
+#: thread: its doors took 86 s with the default library and 1.8 s with this
+#: one; the whole model, 25 s.
 GEOMETRY_LIBRARY = os.environ.get("FLO2_IFC_GEOMETRY_LIBRARY", "hybrid-cgal-simple-opencascade")
 
 
 #: Elements measured by one geometry iterator. IfcOpenShell's iterator keeps
-#: what it has made until it is dropped: one iterator over the whole Wetmore
-#: model (2,186 shapes) peaked at 1.18 GB, over flo2's 1 GiB cap, and batches
+#: what it has made until it is dropped: one iterator over a whole large
+#: model peaked at 1.18 GB, over flo2's 1 GiB cap, and batches
 #: of 100 peaked at 390 MB for 25% more time (measured 2026-10-23).
 GEOMETRY_BATCH = int(os.environ.get("FLO2_IFC_GEOMETRY_BATCH", "250"))
 
@@ -502,7 +502,7 @@ def extent(
     """How far elements reach, measured from their geometry: their bounding boxes.
 
     Name one element by ``element_id``, or many with a ``selector`` (such as
-    ``IfcRoof`` or ``IfcDoor, location = "1ST FLR"``). The reply gives:
+    ``IfcRoof`` or ``IfcDoor, location = "Level 1"``). The reply gives:
 
     - ``overall``: the box around them all, with its ``bottom`` and ``top``;
     - ``highest`` and ``lowest``: the element that reaches highest, and lowest;
