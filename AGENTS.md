@@ -106,6 +106,9 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
 - `tests/test_tool_list.py` compares the tools it lists (names in order, input and output schemas, descriptions by
   sha256) and the reasons ten failing ifcmcp calls give with flo2-ifc 0.3.1's (`tests/tools-0.3.1.json`).
 - `tests/test_reading.py` tests each reader on synthetic models, including a partial answer at a zero time limit.
+- `tests/test_starting_model.py` takes the IFC text out of the starting model's page and holds every variant it
+  describes to no error under `ifc_validate` with express rules and buildingSMART's rules. A change to that page is a
+  change to what flo2 serves: flo2 re-pins to take it.
 - `tests/test_measuring.py` and `tests/test_drawing.py` test the measures and the drawings on `models.measured_site()`,
   whose sizes are known (`models.SITE`).
 - `tests/test_manifests.py` validates the Agent Plugins manifests against the schemas in `tests/schemas/`, and checks
@@ -146,6 +149,7 @@ python3 tools/dependency_currency.py
 | `plugin.json`, `mcp.json` | the plugin, Agent Plugins format |
 | `.claude-plugin/plugin.json`, `.mcp.json` | the plugin, Claude Code format |
 | `tools/dependency_currency.py`, `dependency-holds.toml` | the monthly dependency check, and its holds |
-| `tests/` | the smoke, tool-list, reader, manifest and dependency-check tests, the synthetic models, 0.3.1's tool list, and the vendored schemas |
+| `skills/read-a-building-model/references/starting-a-model.md` | the starting model a chat copies to start a building model from nothing; flo2 serves an unchanged copy beside its skill `read-a-building-model` |
+| `tests/` | the smoke, tool-list, reader, starting-model, manifest and dependency-check tests, the synthetic models, 0.3.1's tool list, and the vendored schemas |
 | `.github/workflows/ci.yml` | tests on Python 3.12, and the image built and run as flo2 confines it |
 | `.github/workflows/dependencies.yml` | the monthly dependency check |
