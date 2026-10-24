@@ -18,8 +18,9 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      # Installs exactly pyproject.toml's pins, ifcmcp from the fork's commit
-      # included, with the test extra (pytest, jsonschema).
+      # Installs exactly pyproject.toml's pins, every one a PyPI release
+      # (ifcopenshell-mcp without its [mcp] extra), with the test extra
+      # (pytest, jsonschema).
       - run: python -m pip install --disable-pip-version-check ".[test]"
       - run: python -m pip freeze --all
       - run: python -m pytest -v
@@ -41,7 +42,8 @@ jobs:
       # The smoke test's own questions (initialize, the 31 tools, ifc_new then
       # ifc_summary, a synthetic millimetre house opened from /design and read
       # with the paged readers, its extent and its validation, then measured and
-      # drawn to a PNG inside the image's /tmp), asked of the
+      # drawn to a PNG inside the image's /tmp), and the tool list compared
+      # with flo2-ifc 0.3.1's (tests/test_tool_list.py), asked of the
       # image under flo2-tool-sandbox's flags, with a folder mounted read-only
       # at /design, as flo2 mounts a design's.
       - name: A folder for the house, mounted as a design is
@@ -56,4 +58,4 @@ jobs:
             --cap-drop ALL --security-opt no-new-privileges --user 65534:65534
             --mount type=bind,source=${{ runner.temp }}/design,target=/design,readonly
             flo2-ifc:ci
-        run: python -m pytest -v tests/test_smoke.py
+        run: python -m pytest -v tests/test_smoke.py tests/test_tool_list.py

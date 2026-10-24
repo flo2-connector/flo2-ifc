@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   currency:
-    name: dependency currency (PyPI pins, the fork pin, Actions, Agent Plugins schema)
+    name: dependency currency (PyPI pins, Actions, Agent Plugins schema)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -37,7 +37,7 @@ jobs:
           python-version: "3.12"
       - name: Report every dependency against its latest release
         env:
-          # Raises the GitHub API's rate limit for the Actions, fork and spec lookups. Read-only.
+          # Raises the GitHub API's rate limit for the Actions and spec lookups. Read-only.
           GITHUB_TOKEN: ${{ github.token }}
         run: python tools/dependency_currency.py --json "dependency-report-$(date -u +%F).json"
       - name: Keep the dated report

@@ -22,7 +22,8 @@ import dependency_currency as dc  # noqa: E402
 
 TODAY = dt.date(2026, 10, 3)
 SHA = "a2bada6699aaf2e0926ed07b9a97e51a70e1ddfb"
-FORK = f"ifcopenshell-mcp[mcp] @ git+https://github.com/sligara7/IfcOpenShell@{SHA}#subdirectory=src/ifcmcp"
+IFCMCP = "ifcopenshell-mcp==0.9.0"
+A_GIT_PIN = f"ifcopenshell-mcp[mcp] @ git+https://github.com/example/IfcOpenShell@{SHA}#subdirectory=src/ifcmcp"
 OLD_MCP = ['ifcopenshell', 'ifcquery', 'ifcedit', 'mcp<2,>=1.0; extra == "mcp"']
 NEW_MCP = ['ifcopenshell', 'ifcquery', 'ifcedit', 'mcp<3,>=2; extra == "mcp"']
 
@@ -58,15 +59,14 @@ def make_repo(tmp: Path, deps: list[str], *, holds: str = "", schema: str = "1.0
 class Fake:
     """PyPI and GitHub, answered from dicts. A missing name raises, as a failed lookup does."""
 
-    def __init__(self, pypi: dict | None = None, github: dict | None = None, commits: dict | None = None):
+    def __init__(self, pypi: dict | None = None, github: dict | None = None):
         self.pypi_data = {"mcp": "2.3.0", "networkx": "3.7", "ifcopenshell": "0.9.0", "setuptools": "84.0.0",
                           "pytest": "9.1.1", "ifcopenshell-mcp": ("0.9.0", OLD_MCP), **(pypi or {})}
         self.github_data = {"actions/checkout": (7, 0, 1), "actions/setup-python": (7, 0, 0),
                             dc.SPEC_REPO: (1, 0, 0), **(github or {})}
-        self.commits = {("sligara7/IfcOpenShell", SHA): "2026-10-02T20:00:00Z", **(commits or {})}
 
     def upstream(self) -> dc.Upstream:
-        return dc.Upstream(pypi=self.pypi, github_latest=self.github_latest, github_commit=self.github_commit)
+        return dc.Upstream(pypi=self.pypi, github_latest=self.github_latest)
 
     def pypi(self, name):
         value = self.pypi_data[name]
@@ -75,9 +75,6 @@ class Fake:
 
     def github_latest(self, slug):
         return self.github_data[slug]
-
-    def github_commit(self, slug, sha):
-        return self.commits[(slug, sha)]
 
 
 def rows(report: dict) -> dict[tuple[str, str], dict]:
@@ -88,7 +85,7 @@ def run(tmp: Path, deps: list[str], fake: Fake | None = None, **kw) -> dict:
     return dc.check(make_repo(tmp, deps, **kw), (fake or Fake()).upstream(), TODAY)
 
 
-BASE = [FORK, "mcp==2.3.0", "ifcopenshell==0.9.0", "networkx==3.7"]
+BASE = [IFCMCP, "mcp==2.3.0", "ifcopenshell==0.9.0", "networkx==3.7"]
 
 
 def test_everything_current_passes(tmp_path):
@@ -96,10 +93,9 @@ def test_everything_current_passes(tmp_path):
     assert report["failing"] == 0, report
     r = rows(report)
     for key in [("package", "mcp"), ("package", "ifcopenshell"), ("package", "networkx"), ("package", "setuptools"),
-                ("package", "pytest"), ("action", "actions/checkout"), ("action", "actions/setup-python"),
-                ("schema", "agent-plugins")]:
+                ("package", "pytest"), ("package", "ifcopenshell-mcp"), ("action", "actions/checkout"),
+                ("action", "actions/setup-python"), ("schema", "agent-plugins")]:
         assert r[key]["state"] == "current", r[key]
-    assert r[("git", "ifcopenshell-mcp")]["state"] == "fork"
 
 
 def test_patch_and_minor_releases_are_reported_not_failed(tmp_path):
@@ -128,7 +124,7 @@ HOLD = """
 [[hold]]
 kind = "package"
 name = "mcp"
-reason = "3.0 renames MCPServer again; the fork moves first."
+reason = "3.0 renames MCPServer again; flo2-ifc's server moves first."
 look_again = {date}
 """
 
@@ -189,43 +185,39 @@ def test_the_build_backend_and_test_extra_are_checked_too(tmp_path):
     assert r[("package", "pytest")]["state"] == "minor_owed"
 
 
-# ---- the git pin --------------------------------------------------------------
+# ---- ifcopenshell-mcp, and pins from a URL ---------------------------------------
 
 
-def test_the_fork_stays_while_pypi_still_requires_mcp_below_2(tmp_path):
-    row = rows(run(tmp_path, BASE))[("git", "ifcopenshell-mcp")]
-    assert row["state"] == "fork"
-    assert row["pinned"] == f"sligara7/IfcOpenShell@{SHA[:12]} (subdirectory=src/ifcmcp)"
-    assert row["latest"] == "0.9.0 (PyPI)"
-    assert SHA[:12] in row["note"] and "2026-10-02" in row["note"]
-    assert "mcp<2: yes" in row["note"]
+def test_ifcmcp_says_upstreams_own_server_still_needs_mcp_below_2(tmp_path):
+    row = rows(run(tmp_path, BASE))[("package", "ifcopenshell-mcp")]
+    assert row["state"] == "current"
+    assert "still requires mcp `<2,>=1.0`" in row["note"]
+    assert "without the [mcp] extra" in row["note"]
 
 
-def test_upstream_catching_up_says_the_pin_can_return_to_pypi(tmp_path):
-    report = run(tmp_path, BASE, Fake(pypi={"ifcopenshell-mcp": ("0.10.0", NEW_MCP)}))
-    row = rows(report)[("git", "ifcopenshell-mcp")]
-    assert row["state"] == "return_to_pypi"
-    assert "ifcopenshell-mcp==0.10.0" in row["note"]
-    assert report["failing"] == 0, "reported for the monthly review, not failed"
+def test_upstreams_server_catching_up_is_reported_not_failed(tmp_path):
+    report = run(tmp_path, BASE, Fake(pypi={"ifcopenshell-mcp": ("0.9.1", NEW_MCP)}))
+    row = rows(report)[("package", "ifcopenshell-mcp")]
+    assert row["state"] == "patch_owed"
+    assert "now admits mcp 2.3.0" in row["note"]
+    assert report["failing"] == 0
 
 
 def test_old_style_parenthesised_requirements_are_read(tmp_path):
-    fake = Fake(pypi={"ifcopenshell-mcp": ("0.8.5", ['mcp (<2,>=1.0) ; extra == "mcp"'])})
-    assert rows(run(tmp_path, BASE, fake))[("git", "ifcopenshell-mcp")]["state"] == "fork"
+    fake = Fake(pypi={"ifcopenshell-mcp": ("0.9.0", ['mcp (<2,>=1.0) ; extra == "mcp"'])})
+    assert "still requires mcp `<2,>=1.0`" in rows(run(tmp_path, BASE, fake))[("package", "ifcopenshell-mcp")]["note"]
 
 
-def test_a_fork_commit_github_does_not_have_fails(tmp_path):
-    fake = Fake()
-    fake.commits.clear()
-    report = run(tmp_path, BASE, fake)
-    assert rows(report)[("git", "ifcopenshell-mcp")]["state"] == "unknown"
+def test_a_new_ifcmcp_series_fails_like_any_other(tmp_path):
+    report = run(tmp_path, BASE, Fake(pypi={"ifcopenshell-mcp": ("0.10.0", OLD_MCP)}))
+    assert rows(report)[("package", "ifcopenshell-mcp")]["state"] == "series_owed"
     assert report["failing"] == 1
 
 
-def test_a_git_pin_to_a_branch_is_unpinned(tmp_path):
-    branch = FORK.replace(SHA, "ifcmcp/mcp-python-sdk-2")
-    report = run(tmp_path, [branch, *BASE[1:]])
-    assert rows(report)[("git", "ifcopenshell-mcp")]["state"] == "unpinned"
+def test_a_pin_from_a_url_fails(tmp_path):
+    report = run(tmp_path, [A_GIT_PIN, *BASE[1:]])
+    row = rows(report)[("package", "ifcopenshell-mcp")]
+    assert row["state"] == "url_pin"
     assert report["failing"] == 1
 
 
@@ -300,11 +292,15 @@ def test_this_repository_pins_every_dependency_exactly():
     assert pins, "pyproject.toml lists dependencies"
     for pin in pins:
         assert not pin.unreadable, pin
-        if pin.url is not None:
-            assert dc.GIT_URL.match(pin.url), pin
-            assert len(dc.GIT_URL.match(pin.url).group(2)) == 40, "the git pin is a full commit id"
-        else:
-            assert pin.exact is not None, f"{pin.raw} in {pin.where} is not pinned exactly"
+        assert pin.url is None, f"{pin.raw} is installed from a URL; every dependency is a PyPI release"
+        assert pin.exact is not None, f"{pin.raw} in {pin.where} is not pinned exactly"
+
+
+def test_ifcmcp_is_upstreams_release_without_its_mcp_extra():
+    """The [mcp] extra asks for mcp<2, which cannot sit beside the mcp 2.x
+    flo2-ifc's server is built on; core.py never imports mcp."""
+    raw = next(p.raw for p in dc.declared_pins(REPO) if p.name == dc.IFCMCP)
+    assert raw == "ifcopenshell-mcp==0.9.0", raw
 
 
 def test_this_repository_passes_against_upstream_at_its_own_pins():
@@ -316,7 +312,6 @@ def test_this_repository_passes_against_upstream_at_its_own_pins():
     github = {slug: (int(sorted(use["refs"])[0].lstrip("v")), 0, 0)
               for slug, use in dc.declared_actions(REPO).items()}
     fake = Fake(pypi=pypi, github=github)
-    fake.commits = {("sligara7/IfcOpenShell", dc.GIT_URL.match(next(p.url for p in pins if p.url)).group(2)): "now"}
     report = dc.check(REPO, fake.upstream(), TODAY)
     assert report["failing"] == 0, dc.markdown(report)
     holds = tomllib.loads((REPO / dc.HOLDS).read_text())

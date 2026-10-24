@@ -15,7 +15,9 @@ The repository holds six things:
 
 Until 0.2.0 it held no server code, and `flo2-ifc` handed straight to ifcmcp's own command line. Since 0.2.0 it holds
 one thin layer, **the readers for a whole building**, because a real building did not fit through ifcmcp's tools, and
-since 0.3.0 **measures and drawings to scale** on the same layer.
+since 0.3.0 **measures and drawings to scale** on the same layer. Since 0.4.0 **the server is flo2-ifc's own**, on the
+MCP Python SDK 2.x, serving ifcmcp's tools from upstream's published `ifcopenshell-mcp` rather than from a fork
+(below, "Where ifcmcp comes from").
 
 ## The readers for a whole building (since 0.2.0)
 
@@ -31,13 +33,12 @@ A large building model read through flo2 (2026-10-23) showed five problems. A ch
 | (none) | no way to say how high the roof is | `ifc_extent`: bounding boxes from the geometry, in the model's unit, metres, and feet and inches |
 | (none) | replies said lengths were "usually metres" | `ifc_units`, and `units` in every reply that carries a length, area or volume |
 
-`src/flo2_ifc/server.py` builds ifcmcp's own server, takes its one session, and replaces seven tools with the readers
-in `src/flo2_ifc/reading.py`. Each replacement keeps its name and only ADDS optional arguments. `ifcmcp`, also on PATH
-in the image, is still the fork's server alone.
+`src/flo2_ifc/server.py` reads every tool ifcmcp's own server defines, takes its one session, and serves them on its
+own server, with seven of them replaced by the readers in `src/flo2_ifc/reading.py`. Each replacement keeps its name
+and only ADDS optional arguments.
 
-These readers are flo2-ifc's, not the fork's: the fork stays IfcOpenShell plus the SDK port. The ones ifcmcp itself
-would want (paging, the storey of a room, units, a timed validation, extent) can be offered to the fork as their own
-upstreamable changes; that is a separate decision.
+These readers are flo2-ifc's, not ifcmcp's. The ones ifcmcp itself would want (paging, the storey of a room, units, a
+timed validation, extent) can be offered to IfcOpenShell as their own changes; that is a separate decision.
 
 The limits are set by the environment: `FLO2_IFC_PAGE_CHARS` (20,000 characters of JSON in one listing),
 `FLO2_IFC_SECONDS` (30 s of measuring or checking in one call), `FLO2_IFC_GEOMETRY_LIBRARY`
@@ -94,33 +95,47 @@ Measured on a large building model in the image under flo2's flags (1 CPU, 1 GiB
 (30.0 s, partial, then 21.9 s), and 21.5 s once its shapes are kept; every measure 0.1 s or less once the shapes are
 made; memory at most about 481 MiB (sampled).
 
-## Why this is separate from the fork
+## Where ifcmcp comes from (since 0.4.0)
 
-ifcmcp on PyPI is built on the MCP Python SDK 1.x: every `ifcopenshell-mcp` release so far requires `mcp<2`. Every MCP
-server Anthony runs must be on its language's latest official SDK, so ifcmcp is ported to the SDK 2.x (`MCPServer`) on
-Anthony's fork of IfcOpenShell:
+ifcmcp is two parts. `core.py` (`IfcSession`) is the tool code: glue over IfcOpenShell's own `ifcquery` and `ifcedit`,
+and it never imports `mcp`. `server.py` registers each tool on the MCP Python SDK's FastMCP. Every
+`ifcopenshell-mcp` release so far builds that server on the SDK 1.x, and its `[mcp]` extra requires `mcp>=1,<2`.
+Every MCP server Anthony runs must be on its language's latest official SDK, which is 2.x, where FastMCP is renamed
+`MCPServer`.
 
-- repository: [sligara7/IfcOpenShell](https://github.com/sligara7/IfcOpenShell)
-- branch: `ifcmcp/mcp-python-sdk-2`
-- commit: `0ea3edc7a38d08c4c40918201357bd637fdaa39d`
+Until 0.3.1 flo2-ifc installed ifcmcp from Anthony's fork of IfcOpenShell (sligara7/IfcOpenShell, branch
+`ifcmcp/mcp-python-sdk-2`, commit `0ea3edc7a`), where the server was ported to the SDK 2.x. Since 0.4.0
+(decision `dec:idea-flo2-ifc-drops-the-ifcmcp-layer-or-the-fork`, settled 2026-10-24):
 
-There, 74 of 74 ifcmcp tests pass on mcp 2.3.0. A failing tool still tells the agent why: the port raises the SDK's
-`ToolError`, whose text MCPServer passes on (any other exception reaches the agent as a bare "Error executing tool").
+- `pyproject.toml` pins upstream's own `ifcopenshell-mcp==0.9.0` from PyPI, **without** its `[mcp]` extra. Its
+  `core.py` is the fork's, word for word, but for two docstring lines.
+- `flo2_ifc.server.build_server` runs ifcmcp's own `build_server` once, against a recorder in place of FastMCP. That
+  gives every tool ifcmcp defines, with its own name, arguments, description and function. flo2-ifc then registers
+  each of them on its own `MCPServer` (mcp 2.3.0), except the seven its readers replace.
+- Every tool, ifcmcp's and flo2-ifc's, is registered through one catch that raises a failure as the SDK's
+  `ToolError` with its own reason. MCPServer passes a ToolError's text on, and replaces any other exception with a
+  bare "Error executing tool <name>". This is what the fork's commit `0ea3edc7a` did inside ifcmcp's server.
+- The tools a chat sees did not change. `tests/test_tool_list.py` compares the running server with what 0.3.1 listed
+  (`tests/tools-0.3.1.json`): the same 31 tools in the same order, the same input and output schemas, the same
+  descriptions, and the same reason from each failing ifcmcp tool.
 
-**The fork stays whole: a copy of IfcOpenShell plus that port, and nothing else.** Everything flo2 needs lives here
-instead: the pins, the image, the plugin, the CI and the dependency check. That keeps two things clean:
+The `ifcmcp` command that the release also installs is upstream's own server. It needs mcp<2, so beside mcp 2.3.0 it
+answers `--version` (`ifcmcp 0.9.0`) and does not serve. Use `flo2-ifc`.
 
-- the monthly merge of upstream IfcOpenShell into the fork;
-- the pull request that offers the port upstream.
+The fork's port is offered to IfcOpenShell as a pull request of its own
+(`req:the-ifcmcp-sdk-2-port-is-offered-to-ifcopenshell`). If upstream takes it, flo2-ifc can compare its server with
+upstream's again; the dependency check reports when a new `ifcopenshell-mcp`'s `[mcp]` extra admits the pinned mcp.
 
-Nothing flo2-specific ever goes into the fork.
+flo2-ifc ties itself to two things in ifcmcp that upstream does not promise to keep: `server.py` naming `FastMCP` and
+`ImageContent` and defining its tools inside `build_server`, and the tools closing over one `session`. Both are
+checked when the server starts, which then fails loudly, and the exact pin and the tests cover a change of release.
 
 ## The layers
 
 ```
-flo2-ifc                this repository: pins, image, plugin, CI, dependency check, the readers
-  │                     for a whole building, the measures and the drawings (7 tools replaced, 6 added)
-  └─ ifcmcp             the MCP server (25 tools), from the fork at one commit
+flo2-ifc                this repository: pins, image, plugin, CI, dependency check, the server on mcp 2.x,
+  │                     the readers for a whole building, the measures and the drawings (7 tools replaced, 6 added)
+  └─ ifcmcp             ifcmcp's tool code (25 tools), from ifcopenshell-mcp 0.9.0 on PyPI
        └─ ifcquery, ifcedit (and ifc5d)   the helpers ifcmcp calls into
             └─ ifcopenshell             the Python API
                  └─ the C++ core        compiled into the ifcopenshell wheel
@@ -128,25 +143,21 @@ flo2-ifc                this repository: pins, image, plugin, CI, dependency che
 
 flo2.io never builds IfcOpenShell's source tree. It installs released wheels from PyPI.
 
-ifcmcp builds from the fork's subdirectory `src/ifcmcp` alone. That build is pure Python, with no C++. The fork's
-source says `0.0.0` as its version, because upstream stamps the real number when it makes a release. So
-`ifcmcp --version` prints `ifcmcp 0.0.0`. The commit pinned in `pyproject.toml` says what actually runs.
-
 ## What is pinned and why
 
 Every dependency is pinned exactly in `pyproject.toml`. That list is the set flo2.io installs.
 
 | Pin | Why |
 |---|---|
-| `ifcopenshell-mcp[mcp] @ git+https://github.com/sligara7/IfcOpenShell@0ea3edc…#subdirectory=src/ifcmcp` | ifcmcp on the MCP Python SDK 2.x, from the fork. The `[mcp]` extra makes the resolver hold mcp to the range the fork declares (`>=2,<3`). |
-| `mcp==2.3.0` | The latest official MCP Python SDK. |
+| `ifcopenshell-mcp==0.9.0` | ifcmcp's tool code, from IfcOpenShell's own release. Without the `[mcp]` extra, which requires `mcp<2`; flo2-ifc's server registers its tools on the mcp below. |
+| `mcp==2.3.0` | The latest official MCP Python SDK, which flo2-ifc's own server is built on. |
 | `ifcopenshell==0.9.0`, `ifcquery==0.9.0`, `ifcedit==0.9.0`, `ifc5d==0.9.0` | ifcmcp leaves these unpinned, and they decide what a model can measure. For example, with ifc5d 0.9.0 the base-quantities rule measures a room modelled as a plain box; with 0.8.5 it skips the room without saying so. |
 | `networkx==3.7` | Without it, `ifcedit list` prints a "Note: API not available" line to stdout ahead of its JSON. |
 | `pytest==9.1.1` | `ifc_validate`'s `express_rules` runs IfcOpenShell's rule executor, which imports pytest's assertion rewriting (`ifcopenshell/express/rule_executor.py`). Without it that check fails with "No module named '_pytest'". The tests use it too. |
 | `shapely==2.2.0` | flo2-ifc's footprints and drawings join projected triangles with it. ifcopenshell 0.9.0 requires it, unpinned; flo2-ifc imports it itself, so it is pinned at the version that resolves. |
 | `cairosvg==2.9.1` | `ifc_draw` renders its SVG to PNG with it. It loads the cairo library at run time: the image installs Debian's `libcairo2`, and `fonts-dejavu-core` for the words. Its own dependencies (cairocffi, cssselect2, tinycss2, defusedxml, pillow) are transitive. |
 | `jsonschema==4.26.0` (the `test` extra) | The manifest tests. |
-| `setuptools==84.0.0` (build) | The build backend, so this package builds the same way every time. |
+| `setuptools==84.2.1` (build) | The build backend, so this package builds the same way every time. |
 
 Some things are deliberately left out:
 
@@ -172,11 +183,8 @@ So the image needs no network and no writable root at run time:
 - the build checks `flo2-ifc --version` and `ifcmcp --version`;
 - the entry point is `flo2-ifc` on stdio (it was `ifcmcp` until 0.2.0).
 
-flo2 is meant to build its ifcmcp image from this repository's `Dockerfile` at a pinned commit, the same way it already
-builds flo2-cad's image.
-
-**That change in flo2 is not made yet.** Today flo2 still builds `ops/images/ifcmcp/Dockerfile`, which has
-`ifcopenshell-mcp[mcp]==0.8.5` on mcp 1.30.0.
+flo2 builds its image from this repository's `Dockerfile` at one pinned commit of this repository
+(`ops/images/flo2-ifc/COMMIT` in flo2), the same way it builds flo2-cad's, and its broker names the same tag.
 
 ```sh
 docker build -t flo2-ifc .
@@ -185,13 +193,13 @@ docker run --rm -i --network none --read-only --tmpfs /tmp --user 65534:65534 \
   --mount type=bind,source="$PWD",target=/design,readonly flo2-ifc     # MCP on stdin/stdout; ifc_draw writes under /tmp
 ```
 
-The image is a two-stage build. The fork pin is a git URL, so installing it needs git. The build stage has git; the
-final image does not.
+The image is a two-stage build: the build stage installs the package from its source, and the final image gets only
+the finished environment. Since 0.4.0 every dependency is a PyPI release, so neither stage needs git.
 
 ## Use it locally
 
-You need [uv](https://docs.astral.sh/uv/). The first run fetches the fork's commit, which takes about a minute. After
-that, uv's cache makes it quick.
+You need [uv](https://docs.astral.sh/uv/). Every dependency is a release on PyPI, and uv's cache makes a second run
+quick.
 
 **As a plugin.** This repository is a plugin in two formats, and both start the same server, named `ifc`:
 
@@ -222,7 +230,7 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 ## The tests and the checks
 
-`python -m pytest` runs six test files:
+`python -m pytest` runs seven test files:
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp 2.3.0 client. It checks that:
   - the server initializes as `ifc-mcp`, with instructions;
@@ -231,6 +239,11 @@ uv venv -p 3.12 && uv pip install '.[test]'
   - a synthetic millimetre house (`tests/models.py`), opened with `ifc_load`, reads whole: its units, a page of the
     tree, doors by storey, the roof's top, a room's storey, and a complete validation; and it is measured and drawn
     (a footprint, a volume, and a plan rendered to PNG, which checks the image's cairo library and fonts).
+- `tests/test_tool_list.py` starts it the same way and compares what it lists with flo2-ifc 0.3.1's list
+  (`tests/tools-0.3.1.json`, read from 0.3.1 over stdio): the server's name and instructions, the 31 tools in order,
+  each one's input and output schemas, its description (by sha256, so ifcmcp's LGPL text is not copied here), and the
+  reason each of ten failing ifcmcp calls gives. A difference means the tools changed, and flo2's real-ifcmcp door
+  test must change with them.
 - `tests/test_measuring.py` and `tests/test_drawing.py` test the measures and the drawings on a synthetic model whose
   sizes are known (`models.measured_site()`): a slab over a footing counted once, an open mesh refused a volume, the
   clear distance between two walls, a plan to a scale measured off the SVG, sections along a line, a grid line and
@@ -249,8 +262,8 @@ uv venv -p 3.12 && uv pip install '.[test]'
 `.github/workflows/ci.yml` has two jobs:
 
 - the tests, on Python 3.12;
-- the image: build it, run `--version` with no network, a read-only root and user 65534:65534, then run the smoke test
-  against the image.
+- the image: build it, run `--version` with no network, a read-only root and user 65534:65534, then run the smoke and
+  tool-list tests against the image.
 
 ## The monthly dependency check
 
@@ -264,8 +277,8 @@ It compares four things with their latest releases:
 - every pin, with PyPI;
 - every Action, with its latest GitHub release;
 - the Agent Plugins schema version, with the spec repository's latest tag;
-- the fork pin. For this one it reports the fork commit, PyPI's latest `ifcopenshell-mcp`, and whether that release
-  still requires `mcp<2`.
+- for `ifcopenshell-mcp`, also whether its latest release's `[mcp]` extra still requires `mcp<2`, that is, whether
+  IfcOpenShell's own server has caught up with the SDK 2.x. That is reported, never failed.
 
 What the check does with each result:
 
@@ -276,26 +289,21 @@ What the check does with each result:
 | A hold past its `look_again` date, or a hold with no reason or no date | Fails. |
 | A pin that is a range instead of an exact version | Fails. |
 | A lookup the check could not make | Fails. |
-| PyPI's latest `ifcopenshell-mcp` admits the pinned mcp | Reported as `return_to_pypi`: the fork pin can go back to a release. |
+| A dependency installed from a URL (`name @ git+https://...`) instead of a release | Fails (`url_pin`). |
 
 The report is dated. It goes to stdout and to the run's summary, and a JSON copy is kept for 90 days. Run it by hand
 with `python3 tools/dependency_currency.py`; set `GITHUB_TOKEN` to raise GitHub's rate limit.
 
-## Moving the fork pin
+## Moving the ifcopenshell-mcp pin
 
-**To a newer commit on the fork**, for example after the monthly upstream merge or a fix to the port:
+To a newer `ifcopenshell-mcp` release:
 
-1. On the fork, run ifcmcp's own tests on branch `ifcmcp/mcp-python-sdk-2` (`cd src/ifcmcp && pytest tests`), and push.
-2. Here, change the commit in the `ifcopenshell-mcp` line of `pyproject.toml`. Use the full 40-character id: the check
-   fails on a branch name.
-3. Install and test: `uv pip install '.[test]' && python -m pytest`. Build the image and run its `--version`.
+1. Change its line in `pyproject.toml`, still without the `[mcp]` extra (unless that extra now admits the pinned mcp).
+2. Install and test: `uv pip install '.[test]' && python -m pytest`. `tests/test_tool_list.py` says whether the tools
+   changed. If they did on purpose, regenerate `tests/tools-0.3.1.json` under a new name for the new list, and change
+   flo2's door (its real-ifcmcp test) in the same step.
+3. Build the image and run its `--version` and the smoke test against it.
 4. Open a pull request, then move flo2's pin to the new commit of this repository.
-
-**Back to a PyPI release.** Do this once the dependency check reports `return_to_pypi`:
-
-1. Replace the git line with `"ifcopenshell-mcp[mcp]==X.Y.Z"`.
-2. Run the same tests. The smoke test's tool names say whether upstream's server is the same one.
-3. Retire the fork branch only after the change has landed and flo2 runs it.
 
 ## The design
 
