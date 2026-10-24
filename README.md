@@ -7,14 +7,15 @@ building model. It is published on PyPI as `ifcopenshell-mcp` and licensed LGPL-
 The repository holds six things:
 
 - the pinned set, in `pyproject.toml`;
-- the readers for a whole building, in `src/flo2_ifc/` (below);
+- the readers for a whole building, and the measures and drawings, in `src/flo2_ifc/` (below);
 - the container recipe flo2.io builds, in `Dockerfile`;
 - the plugin, in two formats;
 - a small CI;
 - a monthly dependency check.
 
 Until 0.2.0 it held no server code, and `flo2-ifc` handed straight to ifcmcp's own command line. Since 0.2.0 it holds
-one thin layer, **the readers for a whole building**, because a real building did not fit through ifcmcp's tools.
+one thin layer, **the readers for a whole building**, because a real building did not fit through ifcmcp's tools, and
+since 0.3.0 **measures and drawings to scale** on the same layer.
 
 ## The readers for a whole building (since 0.2.0)
 
@@ -45,6 +46,49 @@ The limits are set by the environment: `FLO2_IFC_PAGE_CHARS` (20,000 characters 
 1.8 s with this one) and `FLO2_IFC_GEOMETRY_BATCH` (250 elements per geometry iterator: one iterator over the whole
 model peaked at 1.18 GB, over flo2's 1 GiB cap; batches of 250 peak at 390 MB).
 
+## Measures and drawings (since 0.3.0)
+
+Phase 2 of the Wetmore proof of concept: a chat measures a building model and draws it to scale. Seth explores taking
+out the basement storage and the two east basement units; Alex must end with drawings of his shop to scale. Each tool
+reads the elements' triangle meshes, as IfcOpenShell's geometry iterator makes them (world coordinates), in
+`src/flo2_ifc/geometry.py` and `src/flo2_ifc/drawing.py`:
+
+| Tool | What it gives |
+|---|---|
+| `ifc_footprint` | each element's footprint (its shape projected onto plan), and the SET's, in which what is stacked counts once (`stacked_overlap` says how much) |
+| `ifc_volume` | the volume of each CLOSED mesh, and their total; an OPEN mesh is named in `not_closed` and refused, because what it encloses depends on where it is measured from (the Wetmore roofs' stored volumes are exactly that fault) |
+| `ifc_extent` `datum` | heights above a storey's level or a given height (`above_datum`) |
+| `ifc_distance` | the shortest gap between two elements' surfaces with the two closest points (exact over every corner, edge and triangle), the box gaps and the centres |
+| `ifc_draw` | a plan of a storey at a cut height, a section along a line, a grid line or through named elements, or an elevation of one side, as an SVG in millimetres of paper and a PNG, to a stated scale written on the sheet with the model's unit and a scale bar in metres and feet; `highlight` draws elements in orange |
+
+Every measure answers in the model's unit, in metres (square, cubic) and in feet and inches (square, cubic feet), and
+carries `cite`: the model file's name and sha256, the elements' GlobalIds, the unit and the method, which flo2-calc
+keeps with the number. When the session's copy was edited after it was opened, `cite.edited` says the number is of
+the edited copy, not of the file the sha256 names.
+
+**Why flo2-ifc draws for itself.** ifcmcp's `ifc_plot` goes through `ifcopenshell.draw`, which in 0.9.0 raises
+`'SwigPyObject' object has no attribute 'is_a'` at draw.py:376 in its cells pass (`ray_intersection_result.instance`
+is an `express::entity`, which IfcOpenShell's SWIG wrapper does not wrap), and with cells off it draws no scale and
+nothing on a storey with no elevation. flo2-ifc installs ifcopenshell 0.9.0 from PyPI, so a fix in the fork would not
+reach it; the fix is offered upstream on its own. `ifc_plot` and `ifc_render` stay in the server unchanged.
+
+**How it draws.** What a plane cuts is joined into rings and filled dark; what lies beyond the cut (below it, in a
+plan) is each element's triangles projected, snapped to a tenth of a millimetre of paper and joined, drawn white with
+a thin line, farthest first so nearer ones cover them. Snapping loses nothing the sheet can show and joins a detailed
+fixture's thousands of triangles into few. Rooms are outlined and named, with their area in a plan; a section or
+elevation marks each storey's level. The scale, when none is given, is the largest of the architect's and the metric
+scales that fits the sheet.
+
+**The meshes are kept** for the session (`FLO2_IFC_MESH_CACHE_MB`, 256 MB; the whole Wetmore model's are about
+23 MB), so a second drawing or measure of the same elements does not make them again, and they are forgotten whenever
+the session's model changes (an edit, a shape, a reload: `server._watch_changes`). A drawing that runs out of
+`FLO2_IFC_SECONDS` stops with `partial` and keeps what it made: the same call again goes on.
+
+Measured on a local copy of the Wetmore model in the image under flo2's flags (1 CPU, 1 GiB, 2026-10-24): the basement
+plan in 8.0 s; the section through the east units, which makes the shapes of the whole building first, in two calls
+(30.0 s, partial, then 21.9 s), and 21.5 s once its shapes are kept; every measure 0.1 s or less once the shapes are
+made; memory at most about 481 MiB (sampled).
+
 ## Why this is separate from the fork
 
 ifcmcp on PyPI is built on the MCP Python SDK 1.x: every `ifcopenshell-mcp` release so far requires `mcp<2`. Every MCP
@@ -69,8 +113,8 @@ Nothing flo2-specific ever goes into the fork.
 ## The layers
 
 ```
-flo2-ifc                this repository: pins, image, plugin, CI, dependency check,
-  │                     and the readers for a whole building (7 tools replaced, 2 added)
+flo2-ifc                this repository: pins, image, plugin, CI, dependency check, the readers
+  │                     for a whole building, the measures and the drawings (7 tools replaced, 6 added)
   └─ ifcmcp             the MCP server (25 tools), from the fork at one commit
        └─ ifcquery, ifcedit (and ifc5d)   the helpers ifcmcp calls into
             └─ ifcopenshell             the Python API
@@ -94,6 +138,8 @@ Every dependency is pinned exactly in `pyproject.toml`. That list is the set flo
 | `ifcopenshell==0.9.0`, `ifcquery==0.9.0`, `ifcedit==0.9.0`, `ifc5d==0.9.0` | ifcmcp leaves these unpinned, and they decide what a model can measure. For example, with ifc5d 0.9.0 the base-quantities rule measures a room modelled as a plain box; with 0.8.5 it skips the room without saying so. |
 | `networkx==3.7` | Without it, `ifcedit list` prints a "Note: API not available" line to stdout ahead of its JSON. |
 | `pytest==9.1.1` | `ifc_validate`'s `express_rules` runs IfcOpenShell's rule executor, which imports pytest's assertion rewriting (`ifcopenshell/express/rule_executor.py`). Without it that check fails with "No module named '_pytest'". The tests use it too. |
+| `shapely==2.2.0` | flo2-ifc's footprints and drawings join projected triangles with it. ifcopenshell 0.9.0 requires it, unpinned; flo2-ifc imports it itself, so it is pinned at the version that resolves. |
+| `cairosvg==2.9.1` | `ifc_draw` renders its SVG to PNG with it. It loads the cairo library at run time: the image installs Debian's `libcairo2`, and `fonts-dejavu-core` for the words. Its own dependencies (cairocffi, cssselect2, tinycss2, defusedxml, pillow) are transitive. |
 | `jsonschema==4.26.0` (the `test` extra) | The manifest tests. |
 | `setuptools==84.0.0` (build) | The build backend, so this package builds the same way every time. |
 
@@ -101,7 +147,7 @@ Some things are deliberately left out:
 
 - **pyvista.** It is 900 MB, and only `ifc_render` needs it. flo2's door does not offer that tool. Without pyvista, the
   tool is still listed, but calling it fails.
-- **Transitive dependencies** (numpy, shapely, pydantic and the rest). They are not pinned: each comes in at whatever
+- **Transitive dependencies** (pydantic, pillow and the rest). They are not pinned: each comes in at whatever
   version the pinned packages accept. `pip freeze --all` in the image build and in CI shows what was installed.
 
 ## How flo2.io uses it
@@ -130,8 +176,8 @@ builds flo2-cad's image.
 ```sh
 docker build -t flo2-ifc .
 docker run --rm --network none --read-only --cap-drop ALL --user 65534:65534 flo2-ifc --version
-docker run --rm -i --network none --read-only --user 65534:65534 \
-  --mount type=bind,source="$PWD",target=/design,readonly flo2-ifc     # MCP on stdin/stdout
+docker run --rm -i --network none --read-only --tmpfs /tmp --user 65534:65534 \
+  --mount type=bind,source="$PWD",target=/design,readonly flo2-ifc     # MCP on stdin/stdout; ifc_draw writes under /tmp
 ```
 
 The image is a two-stage build. The fork pin is a git URL, so installing it needs git. The build stage has git; the
@@ -171,14 +217,19 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 ## The tests and the checks
 
-`python -m pytest` runs four test files:
+`python -m pytest` runs six test files:
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp 2.3.0 client. It checks that:
   - the server initializes as `ifc-mcp`, with instructions;
-  - it lists ifcmcp's 25 tools and flo2-ifc's two, and the readers take their paging and filter arguments;
+  - it lists ifcmcp's 25 tools and flo2-ifc's six, and the readers and measures take their arguments;
   - `ifc_new` and then `ifc_summary` both answer;
   - a synthetic millimetre house (`tests/models.py`), opened with `ifc_load`, reads whole: its units, a page of the
-    tree, doors by storey, the roof's top, a room's storey, and a complete validation.
+    tree, doors by storey, the roof's top, a room's storey, and a complete validation; and it is measured and drawn
+    (a footprint, a volume, and a plan rendered to PNG, which checks the image's cairo library and fonts).
+- `tests/test_measuring.py` and `tests/test_drawing.py` test the measures and the drawings on a synthetic model whose
+  sizes are known (`models.measured_site()`): a slab over a footing counted once, an open mesh refused a volume, the
+  clear distance between two walls, a plan to a scale measured off the SVG, sections along a line, a grid line and
+  through named elements, an elevation, and a region.
 - `tests/test_reading.py` tests each reader on synthetic models, at sizes that pass a reply's budget (400 walls on
   one storey), and with a time limit of zero so a partial answer is tested too. No real person's model is ever a
   fixture.

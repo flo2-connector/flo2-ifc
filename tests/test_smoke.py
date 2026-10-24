@@ -43,7 +43,7 @@ EXPECTED_TOOLS = {
     # drawing
     "ifc_plot", "ifc_render",
     # flo2-ifc's own (src/flo2_ifc/server.py)
-    "ifc_extent", "ifc_units",
+    "ifc_extent", "ifc_units", "ifc_footprint", "ifc_volume", "ifc_distance", "ifc_draw",
 }
 
 #: The optional arguments flo2-ifc's readers add to ifcmcp's tools.
@@ -52,7 +52,9 @@ ADDED_ARGUMENTS = {
     "ifc_select": {"query", "offset", "limit"},
     "ifc_relations": {"element_id", "traverse", "element_type", "offset", "limit"},
     "ifc_validate": {"express_rules", "start"},
-    "ifc_extent": {"selector", "element_id", "offset", "limit"},
+    "ifc_extent": {"selector", "element_id", "offset", "limit", "datum"},
+    "ifc_footprint": {"selector", "ids", "element_id", "offset", "limit"},
+    "ifc_volume": {"selector", "ids", "element_id", "offset", "limit"},
 }
 
 
@@ -111,6 +113,10 @@ async def round_trip() -> dict:
             spaces = json.loads(text_of(await session.call_tool("ifc_select", {"query": "IfcSpace"})))
             out["room"] = json.loads(text_of(await session.call_tool("ifc_info", {"element_id": spaces["elements"][0]["id"]})))
             out["checked"] = json.loads(text_of(await session.call_tool("ifc_validate", {})))
+            out["footprint"] = json.loads(text_of(await session.call_tool("ifc_footprint", {"selector": "IfcWall"})))
+            out["volume"] = json.loads(text_of(await session.call_tool("ifc_volume", {"selector": "IfcWall"})))
+            # Written where the confined image can write: its /tmp, as flo2's slot gives it an outbox.
+            out["draw"] = json.loads(text_of(await session.call_tool("ifc_draw", {"output_path": f"{tempfile.gettempdir()}/flo2-ifc-smoke-plan", "storey": "GROUND"})))
     return out
 
 
@@ -124,10 +130,10 @@ def test_initialize_names_the_server_and_gives_instructions(served):
     assert served["instructions"] and "ifc_load" in served["instructions"]
 
 
-def test_list_tools_gives_ifcmcps_25_tools_and_flo2_ifcs_two(served):
+def test_list_tools_gives_ifcmcps_25_tools_and_flo2_ifcs_six(served):
     names = served["tools"]
-    assert len(names) == 27, names
-    assert len(set(names)) == 27, names
+    assert len(names) == 31, names
+    assert len(set(names)) == 31, names
     assert set(names) == EXPECTED_TOOLS
     for name in ("ifc_load", "ifc_summary", "ifc_edit", "ifc_plot", "ifc_render"):
         assert name in names
@@ -138,7 +144,7 @@ def test_the_readers_take_their_paging_and_filter_arguments(served):
         props = set(served["schemas"][tool].get("properties", {}))
         assert props == wanted, (tool, props)
         required = set(served["schemas"][tool].get("required", []))
-        assert required <= {"query", "element_id"} - ({"element_id"} if tool == "ifc_extent" else set()), (tool, required)
+        assert required <= {"query", "element_id"} - ({"element_id"} if tool in ("ifc_extent", "ifc_footprint", "ifc_volume") else set()), (tool, required)
 
 
 def test_a_millimetre_house_reads_whole_through_the_server(served):
@@ -173,3 +179,15 @@ def test_express_rule_validation_runs(served):
     is_error, text = served["validate"]
     assert not is_error, text
     assert "_pytest" not in text, text
+
+
+def test_the_house_is_measured_and_drawn_through_the_server(served):
+    # Three walls, 4 x 0.2 m each, side by side 1 m apart: 2.4 m2 of footprint, 7.2 m3 of solid.
+    assert served["footprint"]["footprint"]["square_metres"] == 2.4
+    assert served["footprint"]["cite"]["model_file"] == "house.ifc"
+    assert len(served["footprint"]["cite"]["sha256"]) == 64
+    assert len(served["footprint"]["cite"]["global_ids"]) == 3
+    assert served["volume"]["total"]["cubic_metres"] == 7.2 and "not_closed" not in served["volume"]
+    drawn = served["draw"]
+    assert drawn["view"] == "plan" and drawn["drawn"]["png_bytes"] > 1000, drawn
+    assert drawn["sheet"]["scale"].startswith("1:") and drawn["elements"]["cut"] == 3, drawn

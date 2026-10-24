@@ -74,3 +74,87 @@ def building(walls: int = 3, schema: str = "IFC4") -> ifcopenshell.file:
     _place(f, roof, x=0.0, y=0.0, z=6.0)
     run("spatial.assign_container", f, relating_structure=first, products=[roof])
     return f
+
+
+#: The known numbers of measured_site(), in metres.
+SITE = {
+    "footing": (0.0, 0.0, -0.5, 4.0, 4.0, 0.5),  # x, y, z, size x, size y, height
+    "slab": (0.0, 0.0, 0.0, 6.0, 4.0, 0.2),
+    "wall_a_y": 0.0,  # wall A runs along x from y 0 to 0.2
+    "wall_b_y": 2.0,  # wall B from y 2.0 to 2.2: a clear gap of 1.8 m
+    "closed_box": (1.0, 2.0, 3.0),  # a closed 1 x 2 x 3 m box: 6 m3
+}
+
+
+def _box(x0, y0, z0, sx, sy, sz, top=True):
+    """A box's corners and its faces as triangles, wound outward; without its top when `top` is false."""
+    v = [(x0 + dx * sx, y0 + dy * sy, z0 + dz * sz) for dz in (0, 1) for dy in (0, 1) for dx in (0, 1)]
+    quads = [(0, 2, 3, 1), (4, 5, 7, 6), (0, 1, 5, 4), (2, 6, 7, 3), (0, 4, 6, 2), (1, 3, 7, 5)]
+    if not top:
+        quads = [q for q in quads if q != (4, 5, 7, 6)]
+    tris = [t for a, b, c, d in quads for t in ((a, b, c), (a, c, d))]
+    return v, tris
+
+
+def measured_site(schema: str = "IFC4") -> ifcopenshell.file:
+    """A model with sizes the measures and drawings are checked against (SITE), in millimetres:
+
+    - GROUND (0) and FIRST (3000 mm) storeys, and a grid with lines "A" (x = 1 m) and "1" (y = 1 m);
+    - a footing (4 x 4 x 0.5 m, top at 0) under a slab (6 x 4 x 0.2 m): stacked over 16 m2;
+    - two parallel walls 4 x 0.2 x 3 m, 1.8 m apart (A at y 0, B at y 2.0);
+    - a closed meshed box 1 x 2 x 3 m (6 m3) and the same box OPEN (no top), at x 8;
+    - a room (IfcSpace) 4 x 4 m with a shape, named "Room 1";
+    all on GROUND."""
+    run = ifcopenshell.api.run
+    f = run("project.create_file", version=schema)
+    project = run("root.create_entity", f, ifc_class="IfcProject", name="Measured site")
+    mm = run("unit.add_si_unit", f, unit_type="LENGTHUNIT", prefix="MILLI")
+    m2 = run("unit.add_si_unit", f, unit_type="AREAUNIT")
+    m3 = run("unit.add_si_unit", f, unit_type="VOLUMEUNIT")
+    run("unit.assign_unit", f, units=[mm, m2, m3])
+    model3d = run("context.add_context", f, context_type="Model")
+    body = run("context.add_context", f, context_type="Model", context_identifier="Body", target_view="MODEL_VIEW", parent=model3d)
+    site = run("root.create_entity", f, ifc_class="IfcSite", name="Site")
+    bldg = run("root.create_entity", f, ifc_class="IfcBuilding", name="Shop")
+    ground = run("root.create_entity", f, ifc_class="IfcBuildingStorey", name="GROUND")
+    first = run("root.create_entity", f, ifc_class="IfcBuildingStorey", name="FIRST")
+    ground.Elevation, first.Elevation = 0.0, 3000.0
+    run("aggregate.assign_object", f, relating_object=project, products=[site])
+    run("aggregate.assign_object", f, relating_object=site, products=[bldg])
+    run("aggregate.assign_object", f, relating_object=bldg, products=[ground, first])
+    for p in (site, bldg, ground):
+        _place(f, p)
+    _place(f, first, z=3.0)
+
+    def element(cls, name, rep, x=0.0, y=0.0, z=0.0, storey=ground):
+        e = run("root.create_entity", f, ifc_class=cls, name=name)
+        run("geometry.assign_representation", f, product=e, representation=rep)
+        _place(f, e, x=x, y=y, z=z)
+        run("spatial.assign_container", f, relating_structure=storey, products=[e])
+        return e
+
+    fx, fy, fz, fsx, fsy, fh = SITE["footing"]
+    element("IfcFooting", "Footing", run("geometry.add_slab_representation", f, context=body, depth=fh, polyline=[(0, 0), (fsx, 0), (fsx, fsy), (0, fsy)]), fx, fy, fz)
+    sx, sy, sz, ssx, ssy, sh = SITE["slab"]
+    element("IfcSlab", "Floor slab", run("geometry.add_slab_representation", f, context=body, depth=sh, polyline=[(0, 0), (ssx, 0), (ssx, ssy), (0, ssy)]), sx, sy, sz)
+    for name, y in (("Wall A", SITE["wall_a_y"]), ("Wall B", SITE["wall_b_y"])):
+        element("IfcWall", name, run("geometry.add_wall_representation", f, context=body, length=4.0, height=3.0, thickness=0.2), 0.0, y, 0.2)
+    bx, by, bz = SITE["closed_box"]
+    for name, top, x in (("Closed box", True, 8.0), ("Open box", False, 10.0)):
+        v, t = _box(0, 0, 0, bx, by, bz, top=top)
+        element("IfcBuildingElementProxy", name, run("geometry.add_mesh_representation", f, context=body, vertices=[v], faces=[t]), x, 0.0, 0.0)
+
+    space = run("root.create_entity", f, ifc_class="IfcSpace", name="Room 1")
+    run("aggregate.assign_object", f, relating_object=ground, products=[space])
+    rep = run("geometry.add_slab_representation", f, context=body, depth=2.7, polyline=[(0, 0), (4, 0), (4, 4), (0, 4)])
+    run("geometry.assign_representation", f, product=space, representation=rep)
+    _place(f, space, x=0.0, y=0.0, z=0.2)
+
+    grid = run("root.create_entity", f, ifc_class="IfcGrid", name="Grid")
+    _place(f, grid)
+    run("spatial.assign_container", f, relating_structure=ground, products=[grid])
+    a = run("grid.create_grid_axis", f, grid=grid, axis_tag="A", uvw_axes="UAxes")
+    a.AxisCurve = f.createIfcPolyline([f.createIfcCartesianPoint((1000.0, -2000.0)), f.createIfcCartesianPoint((1000.0, 6000.0))])
+    one = run("grid.create_grid_axis", f, grid=grid, axis_tag="1", uvw_axes="VAxes")
+    one.AxisCurve = f.createIfcPolyline([f.createIfcCartesianPoint((-2000.0, 1000.0)), f.createIfcCartesianPoint((14000.0, 1000.0))])
+    return f

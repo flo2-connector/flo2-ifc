@@ -495,6 +495,9 @@ def extent(
     offset: int = 0,
     limit: int = 50,
     seconds: float | None = None,
+    datum: str = "",
+    model_path: str | None = None,
+    edits: int = 0,
 ) -> dict[str, Any]:
     """How far elements reach, measured from their geometry: their bounding boxes.
 
@@ -509,7 +512,11 @@ def extent(
     inches. ``z`` is height in the model's world coordinates, the frame each
     storey's placed ``z`` (ifc_tree) is in. The boxes are aligned with the
     model's axes, so a rotated element's box is larger than the element. An
-    element with no 3D shape is counted in ``no_shape``. Reads only.
+    element with no 3D shape is counted in ``no_shape``. With a ``datum`` (a
+    storey's name or id, or a height in the model's unit), ``above_datum``
+    gives the bottom and top above it, and each element's row its own. The
+    reply's ``cite`` names the model file, its sha256 and the elements'
+    GlobalIds, for a number kept in a calculation. Reads only.
     """
     offset, limit = _check_page(offset, limit)
     started = time.monotonic()
@@ -573,9 +580,49 @@ def extent(
         )
     elif shaped_left > 0:
         out["unmeasured"] = shaped_left
+    if datum.strip() and rows:
+        base_model, said = _datum(model, datum)
+        base = base_model * scale
+        for r in page:
+            r["above_datum"] = {"bottom": round(r["bottom"] - base_model, decimals), "top": round(r["top"] - base_model, decimals)}
+        out["above_datum"] = {
+            "datum": said,
+            "datum_z": round(base_model, decimals),
+            "bottom": {"model": round((lo[2] - base) * to_model, decimals), "metres": round(lo[2] - base, 4), "feet_inches": feet_and_inches(lo[2] - base)},
+            "top": {"model": round((hi[2] - base) * to_model, decimals), "metres": round(hi[2] - base, 4), "feet_inches": feet_and_inches(hi[2] - base)},
+            "unit": length_symbol,
+        }
+    from flo2_ifc import geometry
+
+    measured = [e for e in shaped if e.id() in boxes]
+    out["cite"] = geometry.cite(
+        model,
+        model_path,
+        measured,
+        asked,
+        length_symbol,
+        "Extent: the axis-aligned box around each element's triangle mesh (IfcOpenShell's geometry, world coordinates)"
+        + ("; heights above the datum are the box's bottom and top less the datum's height." if datum.strip() else "."),
+        edits,
+    )
     out["seconds"] = round(time.monotonic() - started, 1)
     out["units"] = u["say"]
     return out
+
+
+def _datum(model: ifcopenshell.file, datum: str) -> tuple[float, str]:
+    """A datum's height in the model's length unit, and what it is: a number, or a storey's level."""
+    text = str(datum).strip()
+    try:
+        return float(text), f"z = {float(text):g} (the model's length unit)"
+    except ValueError:
+        pass
+    st = find_storey(model, text)
+    z = _storey_z(st)
+    if z is None:
+        z = float(getattr(st, "Elevation", None) or 0.0)
+        return z, f"storey #{st.id()} \"{st.Name}\", its stored Elevation (it has no placement)"
+    return z, f"storey #{st.id()} \"{st.Name}\", its level (placed z)"
 
 
 # ---------------------------------------------------------------- validate
