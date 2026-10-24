@@ -167,7 +167,7 @@ def test_ifc_new_then_ifc_summary_answer(served):
 
 
 def test_a_failing_tool_says_why(served):
-    # mcp 2.x hides the text of any exception but ToolError; the fork's port raises ToolError.
+    # mcp 2.x hides the text of any exception but ToolError; flo2-ifc's server raises ToolError for every tool.
     is_error, text = served["missing"]
     assert is_error
     assert "#999999" in text, text

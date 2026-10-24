@@ -1,8 +1,14 @@
-"""ifcmcp, as flo2.io runs it: the fork's server, with readers for a whole building.
+"""ifcmcp, as flo2.io runs it: its tools on the MCP Python SDK 2.x, with readers for a whole building.
 
-The server is ifcmcp's own (``ifcmcp.server.build_server``), with its one
-session, its 25 tools and their behaviour unchanged, except where a real
-building did not fit in a reply or a call (reading.py says why):
+The tool code is IfcOpenShell's ifcmcp, from upstream's published package
+(ifcopenshell-mcp, pinned exactly in pyproject.toml, without its ``[mcp]``
+extra, which asks for mcp<2). The server is flo2-ifc's own ``MCPServer`` from
+the MCP Python SDK 2.x. ifcmcp's ``build_server`` is run against a recorder in
+place of FastMCP (``_ifcmcp_tools``), so every tool it defines is registered
+here with its own name, arguments, description and function, which calls
+ifcmcp's ``IfcSession`` (core.py), with its one session and its 25 tools'
+behaviour unchanged, except where a real building did not fit in a reply or a
+call (reading.py says why):
 
 - ``ifc_tree``, ``ifc_select`` and ``ifc_relations`` list a page at a time and
   filter (by IFC class, by storey), and say what they withheld;
@@ -19,6 +25,11 @@ declares); since 0.3.0 the measures ``ifc_footprint``, ``ifc_volume`` and
 to scale as SVG and PNG (drawing.py), which ifcmcp's ``ifc_plot`` cannot make
 in ifcopenshell 0.9.0.
 
+Every tool, ifcmcp's and flo2-ifc's, is registered through one catch
+(``_reason_kept``): a failure reaches the agent as a ToolError with its own
+reason, because MCPServer replaces the text of any other exception with a bare
+"Error executing tool <name>".
+
 Every measure says what flo2-calc needs to cite its number (``cite``: the
 model file and its sha256, the elements' GlobalIds, the unit and the method),
 and whether the session's copy was edited since it was opened: the session's
@@ -27,8 +38,8 @@ drawing after an edit draws the edited model.
 
 Each replacement keeps its tool's name and adds only optional arguments, so a
 caller of ifcmcp's tool still calls it the same way. These are flo2-ifc's, not
-the fork's: the fork stays IfcOpenShell plus the SDK port (AGENTS.md). Any of
-them that ifcmcp itself would want is offered to the fork as its own change.
+ifcmcp's. Any of them that ifcmcp itself would want is offered to IfcOpenShell
+as its own change.
 """
 
 from __future__ import annotations
@@ -81,30 +92,91 @@ def _watch_changes(session: Any) -> dict[str, int]:
     return state
 
 
-def _session_of(server: Any) -> Any:
+class _Recorder:
+    """Stands in for FastMCP while ifcmcp's ``build_server`` runs: it keeps the
+    server's name and instructions, and each tool's function and the keyword
+    arguments it was registered with, in order, and registers nothing."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+        self.tools: list[tuple[Any, dict[str, Any]]] = []
+
+    def tool(self, **kwargs: Any):
+        def record(fn):
+            self.tools.append((fn, kwargs))
+            return fn
+
+        return record
+
+
+def _ifcmcp_tools() -> _Recorder:
+    """Every tool ifcmcp's own server defines, as it defines it.
+
+    ifcmcp's server.py imports FastMCP from mcp 1.x, which mcp 2.x does not
+    have, so on mcp 2.x both its FastMCP and its ImageContent are None. They
+    are set, for this one call, to the recorder and to mcp 2.x's ImageContent
+    (which still accepts ifcmcp's ``mimeType=``, and is the name its image
+    tools' return annotations resolve to), and put back after. If a later
+    ifcmcp builds its server some other way, this fails loudly at start, and
+    the smoke and tool-list tests with it."""
+    import ifcmcp.server as ifcmcp_server
+    from mcp.types import ImageContent
+
+    if not hasattr(ifcmcp_server, "FastMCP") or not hasattr(ifcmcp_server, "ImageContent"):
+        raise RuntimeError("flo2-ifc cannot read this build of ifcmcp's server: it no longer names FastMCP and ImageContent")
+    saved = (ifcmcp_server.FastMCP, ifcmcp_server.ImageContent)
+    ifcmcp_server.FastMCP, ifcmcp_server.ImageContent = _Recorder, ImageContent
+    try:
+        recorded = ifcmcp_server.build_server()
+    finally:
+        ifcmcp_server.FastMCP, ifcmcp_server.ImageContent = saved
+    if not isinstance(recorded, _Recorder) or not recorded.tools:
+        raise RuntimeError("flo2-ifc read no tools from this build of ifcmcp's server")
+    return recorded
+
+
+def _session_of(recorded: _Recorder) -> Any:
     """ifcmcp's one IfcSession, from the closure of the tool that reads it.
 
     ifcmcp keeps its session inside build_server; its tools close over it. If a
     later ifcmcp keeps it some other way, this fails loudly at start, and the
     smoke test with it."""
-    tool = server._tool_manager.get_tool("ifc_summary")
-    fn = getattr(tool, "fn", None)
-    inner = getattr(fn, "__wrapped__", fn)
-    session = inspect.getclosurevars(inner).nonlocals.get("session") if inner else None
+    fn = next((f for f, _ in recorded.tools if f.__name__ == "ifc_summary"), None)
+    session = inspect.getclosurevars(fn).nonlocals.get("session") if fn else None
     if session is None or not hasattr(session, "ifc_load"):
         raise RuntimeError("flo2-ifc cannot find ifcmcp's session in this build of ifcmcp; the readers cannot be added")
     return session
 
 
-def build_server() -> Any:
-    from ifcmcp.server import build_server as ifcmcp_server
+def _reason_kept(fn):
+    """`fn`, raising any failure as a ToolError with its own reason. MCPServer
+    passes on a ToolError's text but replaces any other exception with a bare
+    "Error executing tool <name>", which leaves the agent nothing to correct.
+    This is the one place flo2-ifc's server does it, for every tool."""
     from mcp.server.mcpserver.exceptions import ToolError
 
-    server = ifcmcp_server()
-    session = _session_of(server)
+    @functools.wraps(fn)
+    def call(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except ToolError:
+            raise
+        except Exception as e:
+            raise ToolError(str(e) or type(e).__name__) from e
+
+    return call
+
+
+def build_server() -> Any:
+    from mcp.server.mcpserver import MCPServer
+
+    recorded = _ifcmcp_tools()
+    session = _session_of(recorded)
     watched = _watch_changes(session)
-    for name in REPLACED:
-        server.remove_tool(name)
+    server = MCPServer(**recorded.kwargs)
+    for fn, kwargs in recorded.tools:
+        if fn.__name__ not in REPLACED:
+            server.tool(**kwargs)(_reason_kept(fn))
 
     def model():
         return session._require_model()
@@ -113,19 +185,8 @@ def build_server() -> Any:
         return getattr(session, "model_path", None)
 
     def tool(fn):
-        """Register `fn` under its own name and docstring; any failure reaches
-        the caller as a ToolError, with its reason (as ifcmcp's own do)."""
-
-        @functools.wraps(fn)
-        def call(*args, **kwargs):
-            try:
-                return fn(*args, **kwargs)
-            except ToolError:
-                raise
-            except Exception as e:
-                raise ToolError(str(e) or type(e).__name__) from e
-
-        return server.tool(description=inspect.getdoc(fn))(call)
+        """Register `fn` under its own name and docstring, through the one catch."""
+        return server.tool(description=inspect.getdoc(fn))(_reason_kept(fn))
 
     from ifcquery import info as info_mod
     from ifcquery import relations as relations_mod

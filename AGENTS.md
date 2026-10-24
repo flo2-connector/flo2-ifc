@@ -20,8 +20,8 @@ It holds the exact set flo2.io installs to run IfcOpenShell's ifcmcp:
 - a small CI;
 - a monthly dependency check.
 
-Its one piece of server code is a thin layer: `flo2_ifc.server.build_server` builds ifcmcp's own server, then
-replaces seven of its tools (`ifc_summary`, `ifc_tree`, `ifc_select`, `ifc_info`, `ifc_relations`, `ifc_validate`,
+Its one piece of server code is a thin layer: `flo2_ifc.server.build_server` serves every tool ifcmcp's own server
+defines on flo2-ifc's own `MCPServer` (MCP Python SDK 2.x), then replaces seven of them (`ifc_summary`, `ifc_tree`, `ifc_select`, `ifc_info`, `ifc_relations`, `ifc_validate`,
 `ifc_quantify`) with readers that page, filter, keep to one call's time and name the model's units, and adds six
 (`ifc_extent`, `ifc_units`; since 0.3.0 the measures `ifc_footprint`, `ifc_volume`, `ifc_distance` and the drawing
 `ifc_draw`). README.md, "The readers for a whole building" and "Measures and drawings", says why each one exists. It
@@ -35,14 +35,16 @@ mesh is never drawn after an edit. Keep it thin:
 - every limit (characters, seconds, the geometry library and batch) is an environment setting with a measured default;
 - tests use synthetic models (`tests/models.py`), never a person's model.
 
-The server itself comes from Anthony's fork, [sligara7/IfcOpenShell](https://github.com/sligara7/IfcOpenShell), branch
-`ifcmcp/mcp-python-sdk-2`. There ifcmcp is ported to the MCP Python SDK 2.x. `pyproject.toml` pins it by full commit
-id.
+**Where ifcmcp comes from (since 0.4.0).** ifcmcp's tool code comes from upstream's own release on PyPI,
+`ifcopenshell-mcp`, pinned exactly and **without** its `[mcp]` extra (which requires mcp<2). Its `core.py` never imports
+mcp. flo2-ifc's server reads the tools ifcmcp's `build_server` defines, by running it once against a recorder in place
+of FastMCP, and registers each on its own `MCPServer`, with the same name, arguments and description. Every tool goes
+through one catch that raises a failure as a `ToolError` with its reason. README.md, "Where ifcmcp comes from", says
+why. Until 0.3.1 ifcmcp came from Anthony's fork, sligara7/IfcOpenShell; **the fork is no longer a dependency.**
 
-**Nothing flo2-specific ever goes into the fork.** The fork stays whole: IfcOpenShell plus that port. This keeps the
-monthly upstream merges and the upstream pull request clean.
-
-- A change ifcmcp itself needs is made on the fork as an upstreamable change. Its pin then moves here.
+- `tests/test_tool_list.py` holds the tools to 0.3.1's list (`tests/tools-0.3.1.json`). A change to it is a change to
+  what a chat sees, and flo2's door test changes with it.
+- A change ifcmcp itself needs is offered to IfcOpenShell as an upstream pull request, never patched in here.
 - Anything only flo2 needs belongs here, or in flo2.
 
 ## The three standard requirements
@@ -60,10 +62,10 @@ Every MCP server Anthony runs carries all three. Keep them true here:
 
 ## Rules
 
-- **Every dependency is pinned exactly**, the fork pin by its full 40-character commit id. A range fails the
-  dependency check.
+- **Every dependency is pinned exactly**, to a release on PyPI. A range, or a URL pin (`name @ git+https://...`),
+  fails the dependency check.
 - **Bump one dependency per pull request**, and say what the bump changes.
-- **Moving the fork pin** follows README.md, "Moving the fork pin".
+- **Moving the ifcopenshell-mcp pin** follows README.md, "Moving the ifcopenshell-mcp pin".
 - **No pyvista.** It is 900 MB, and only `ifc_render` needs it.
 - **The image is confined from outside.** flo2's sandbox runs it with:
   - `--network none`;
@@ -73,8 +75,8 @@ Every MCP server Anthony runs carries all three. Keep them true here:
   - the design folder mounted read-only at `/design`.
 
   Nothing in it may need the network or a writable root at run time.
-- **flo2 does not build from this repository yet.** It still builds its own `ops/images/ifcmcp/Dockerfile`. Moving
-  flo2 onto this repository's `Dockerfile`, at a pinned commit as it does for flo2-cad, is a change in flo2, not here.
+- **flo2 builds from this repository**, at one pinned commit (`ops/images/flo2-ifc/COMMIT` in flo2) and the broker's
+  matching tag. Moving that pin is a change in flo2, not here.
 - **Licence.** This repository's own files are Apache-2.0 (`LICENSE`). ifcmcp and IfcOpenShell stay
   LGPL-3.0-or-later.
 - **No secrets** in this repository.
@@ -85,7 +87,7 @@ Work in a virtual environment outside the repository:
 
 ```sh
 uv venv -p 3.12 /tmp/flo2-ifc-venv
-uv pip install --python /tmp/flo2-ifc-venv/bin/python '.[test]'   # fetches the fork's commit: about a minute, the first time
+uv pip install --python /tmp/flo2-ifc-venv/bin/python '.[test]'   # every pin is a PyPI release
 /tmp/flo2-ifc-venv/bin/python -m pytest -v
 ```
 
@@ -98,6 +100,8 @@ uv pip install --python /tmp/flo2-ifc-venv/bin/python '.[test]'   # fetches the 
 
   Set `FLO2_IFC_SERVER` to a command line, such as a `docker run` of the image, to ask a different server the same
   questions.
+- `tests/test_tool_list.py` compares the tools it lists (names in order, input and output schemas, descriptions by
+  sha256) and the reasons ten failing ifcmcp calls give with flo2-ifc 0.3.1's (`tests/tools-0.3.1.json`).
 - `tests/test_reading.py` tests each reader on synthetic models, including a partial answer at a zero time limit.
 - `tests/test_measuring.py` and `tests/test_drawing.py` test the measures and the drawings on `models.measured_site()`,
   whose sizes are known (`models.SITE`).
@@ -113,7 +117,7 @@ docker run --rm --network none --read-only --cap-drop ALL --user 65534:65534 flo
 mkdir -p /tmp/flo2-ifc-design
 FLO2_IFC_DESIGN_DIR=/tmp/flo2-ifc-design FLO2_IFC_DESIGN_SEEN_AS=/design \
 FLO2_IFC_SERVER="docker run --rm -i --network none --read-only --user 65534:65534 --mount type=bind,source=/tmp/flo2-ifc-design,target=/design,readonly flo2-ifc" \
-  /tmp/flo2-ifc-venv/bin/python -m pytest tests/test_smoke.py
+  /tmp/flo2-ifc-venv/bin/python -m pytest tests/test_smoke.py tests/test_tool_list.py
 ```
 
 The dependency report, live (it needs the network):
@@ -128,7 +132,7 @@ python3 tools/dependency_currency.py
 |---|---|
 | `pyproject.toml` | **the pinned set**, and the `flo2-ifc` console script |
 | `src/flo2_ifc/__init__.py` | `main()`: the `flo2-ifc` command |
-| `src/flo2_ifc/server.py` | ifcmcp's server with the readers in front of seven tools, and six added |
+| `src/flo2_ifc/server.py` | the server on MCP SDK 2.x: ifcmcp's tools, the readers in front of seven, and six added |
 | `src/flo2_ifc/reading.py` | the readers: paging, storeys, units, extent (and height above a datum), timed validation |
 | `src/flo2_ifc/geometry.py` | the meshes (kept per session), footprints, volumes and closedness, distances, and `cite` |
 | `src/flo2_ifc/drawing.py` | plans, sections and elevations to scale, as SVG and PNG |
@@ -136,6 +140,6 @@ python3 tools/dependency_currency.py
 | `plugin.json`, `mcp.json` | the plugin, Agent Plugins format |
 | `.claude-plugin/plugin.json`, `.mcp.json` | the plugin, Claude Code format |
 | `tools/dependency_currency.py`, `dependency-holds.toml` | the monthly dependency check, and its holds |
-| `tests/` | the smoke, reader, manifest and dependency-check tests, the synthetic models, and the vendored schemas |
+| `tests/` | the smoke, tool-list, reader, manifest and dependency-check tests, the synthetic models, 0.3.1's tool list, and the vendored schemas |
 | `.github/workflows/ci.yml` | tests on Python 3.12, and the image built and run as flo2 confines it |
 | `.github/workflows/dependencies.yml` | the monthly dependency check |

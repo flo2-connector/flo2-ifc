@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flo2-ifc"
-version = "0.3.1"
-description = "The exact ifcmcp set flo2.io runs: IfcOpenShell's MCP server for IFC building models, on the MCP Python SDK 2.x, pinned."
+version = "0.4.0"
+description = "The exact ifcmcp set flo2.io runs: the tools of IfcOpenShell's MCP server for IFC building models, served on the MCP Python SDK 2.x, pinned."
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "Anthony Sligar" }]
@@ -20,11 +20,11 @@ keywords = ["IFC", "BIM", "MCP", "ifcopenshell", "ifcmcp"]
 # tools/dependency_currency.py checks each pin against its latest release
 # once a month. Why each one is here is in README.md, "What is pinned and why".
 dependencies = [
-  # ifcmcp ported to the MCP Python SDK 2.x (MCPServer), on Anthony's fork,
-  # branch ifcmcp/mcp-python-sdk-2. Every ifcopenshell-mcp on PyPI so far
-  # requires mcp<2. The [mcp] extra makes the resolver hold mcp to the range
-  # the fork itself declares (>=2,<3).
-  "ifcopenshell-mcp[mcp] @ git+https://github.com/sligara7/IfcOpenShell@0ea3edc7a38d08c4c40918201357bd637fdaa39d#subdirectory=src/ifcmcp",
+  # ifcmcp's tool code (core.py), from IfcOpenShell's own release on PyPI.
+  # WITHOUT its [mcp] extra: that extra asks for mcp>=1,<2, and core.py never
+  # imports mcp. flo2-ifc's own server (src/flo2_ifc/server.py) registers
+  # every one of ifcmcp's tools on the MCP Python SDK 2.x pinned below.
+  "ifcopenshell-mcp==0.9.0",
   "mcp==2.3.0",
   # ifcmcp leaves its helpers unpinned, and they decide what a model can measure.
   "ifcopenshell==0.9.0",

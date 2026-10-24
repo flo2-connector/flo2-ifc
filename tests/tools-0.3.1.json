@@ -1,0 +1,1055 @@
+{
+  "_about": "What flo2-ifc 0.3.1 (ifcmcp from the fork at 0ea3edc7a, on mcp 2.3.0) listed over stdio, read 2026-10-24: every tool in order, with its input and output schemas and the sha256 of its description (ifcmcp's descriptions are IfcOpenShell's, LGPL, so they are not copied here), the server's name and the sha256 of its instructions, and the error each failing ifcmcp tool gave. tests/test_tool_list.py checks the running server against it.",
+  "errors": {
+    "ifc_clash": "Error executing tool ifc_clash: No model loaded. Call ifc_load() or ifc_new() first.",
+    "ifc_clash (model open)": "Error executing tool ifc_clash: Instance #999999 not found",
+    "ifc_docs": "Error executing tool ifc_docs: Function 'no.such_function' not found",
+    "ifc_edit": "Error executing tool ifc_edit: No model loaded. Call ifc_load() or ifc_new() first.",
+    "ifc_edit (model open)": "Error executing tool ifc_edit: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)",
+    "ifc_load": "Error executing tool ifc_load: Path does not exist: '/nonexistent/missing.ifc'.",
+    "ifc_materials": "Error executing tool ifc_materials: No model loaded. Call ifc_load() or ifc_new() first.",
+    "ifc_save": "Error executing tool ifc_save: No model loaded. Call ifc_load() or ifc_new() first.",
+    "ifc_schema": "Error executing tool ifc_schema: No model loaded. Call ifc_load() or ifc_new() first.",
+    "ifc_shape_docs": "Error executing tool ifc_shape_docs: ShapeBuilder has no method 'no_such_method'"
+  },
+  "server": {
+    "instructions_sha256": "a97b80fa0422f2c4c93850cae8cf847b76bad68c99762989703ab49c882b3ba1",
+    "name": "ifc-mcp"
+  },
+  "tools": [
+    {
+      "description_sha256": "d693e845766167e49f84b500c3df05008a76bfa777c53db234a704e656135518",
+      "inputSchema": {
+        "properties": {
+          "schema": {
+            "default": "IFC4",
+            "title": "Schema",
+            "type": "string"
+          }
+        },
+        "title": "ifc_newArguments",
+        "type": "object"
+      },
+      "name": "ifc_new",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_newDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "e68c6d85738847c8afdb23b1e2e7a6f741120594cfc786b40aac1bf5001c69b5",
+      "inputSchema": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "ifc_loadArguments",
+        "type": "object"
+      },
+      "name": "ifc_load",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ifc_loadOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "439e2ba85545f776a56755ec21cb25d97a9d98272e793bae9e139ca4052b2149",
+      "inputSchema": {
+        "properties": {
+          "path": {
+            "default": "",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "title": "ifc_saveArguments",
+        "type": "object"
+      },
+      "name": "ifc_save",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ifc_saveOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "a13ab14bf6f376a5adde7f195f1cc871e9e6f892df83af3e5303c371a5b5c1df",
+      "inputSchema": {
+        "properties": {},
+        "title": "ifc_resetArguments",
+        "type": "object"
+      },
+      "name": "ifc_reset",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_resetDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "28b91808c3d775fd1eb189305117345fd300d0de6190d331e39a2ef78cab898e",
+      "inputSchema": {
+        "properties": {
+          "clearance": {
+            "default": 0.0,
+            "title": "Clearance",
+            "type": "number"
+          },
+          "element_id": {
+            "title": "Element Id",
+            "type": "integer"
+          },
+          "scope": {
+            "default": "storey",
+            "title": "Scope",
+            "type": "string"
+          },
+          "tolerance": {
+            "default": 0.002,
+            "title": "Tolerance",
+            "type": "number"
+          }
+        },
+        "required": [
+          "element_id"
+        ],
+        "title": "ifc_clashArguments",
+        "type": "object"
+      },
+      "name": "ifc_clash",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_clashDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "d1cb89a882827705ed3604de76ee53cfb22d325411c2924d6799e6ee0f459933",
+      "inputSchema": {
+        "properties": {},
+        "title": "ifc_contextsArguments",
+        "type": "object"
+      },
+      "name": "ifc_contexts",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Result",
+            "type": "array"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ifc_contextsOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "0d59c295875972851e2cf916c92073a6f56eaebb45eaaef62a3d9288f62d2199",
+      "inputSchema": {
+        "properties": {},
+        "title": "ifc_materialsArguments",
+        "type": "object"
+      },
+      "name": "ifc_materials",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Result",
+            "type": "array"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ifc_materialsOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "c7311ec5ee2b3a5e53e6c4baff6b2c9829206118fb0ea69e9a5e1f614ceb44ca",
+      "inputSchema": {
+        "properties": {
+          "module": {
+            "default": "",
+            "title": "Module",
+            "type": "string"
+          }
+        },
+        "title": "ifc_listArguments",
+        "type": "object"
+      },
+      "name": "ifc_list",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Result",
+            "type": "array"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ifc_listOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "3b379498d516cc170f76e8c491f92d046340ecbeb629162ac298422400e1222a",
+      "inputSchema": {
+        "properties": {
+          "function_path": {
+            "title": "Function Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "function_path"
+        ],
+        "title": "ifc_docsArguments",
+        "type": "object"
+      },
+      "name": "ifc_docs",
+      "outputSchema": null
+    },
+    {
+      "description_sha256": "7f033fd222c60d154af348eb469459ceb6db4c46b40e2b31a428ff2fd41e4e23",
+      "inputSchema": {
+        "properties": {
+          "function_path": {
+            "title": "Function Path",
+            "type": "string"
+          },
+          "params": {
+            "default": "{}",
+            "title": "Params",
+            "type": "string"
+          }
+        },
+        "required": [
+          "function_path"
+        ],
+        "title": "ifc_editArguments",
+        "type": "object"
+      },
+      "name": "ifc_edit",
+      "outputSchema": null
+    },
+    {
+      "description_sha256": "b19fde6c0849ccfa64eb6d53fd30c2f997c92596f0e94624e25fc3883469add5",
+      "inputSchema": {
+        "properties": {
+          "max_depth": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Depth"
+          }
+        },
+        "title": "ifc_scheduleArguments",
+        "type": "object"
+      },
+      "name": "ifc_schedule",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Result",
+            "type": "array"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ifc_scheduleOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "327f4d897f5c0dee85cd461e2fd4fda011b1770cb3017077c812e4e46364ad92",
+      "inputSchema": {
+        "properties": {
+          "max_depth": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Depth"
+          }
+        },
+        "title": "ifc_costArguments",
+        "type": "object"
+      },
+      "name": "ifc_cost",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Result",
+            "type": "array"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ifc_costOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "204ab2d3362ae800f80247ab8e8fe0e088114d3c6151b94bfaf1ec8a878888fe",
+      "inputSchema": {
+        "properties": {
+          "entity_type": {
+            "title": "Entity Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_type"
+        ],
+        "title": "ifc_schemaArguments",
+        "type": "object"
+      },
+      "name": "ifc_schema",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_schemaDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "91c8fdefa27ae17a865c3dd7e7ac3d7c1cfaa84099b6032ff0d7531352953ab0",
+      "inputSchema": {
+        "properties": {},
+        "title": "ifc_shape_listArguments",
+        "type": "object"
+      },
+      "name": "ifc_shape_list",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Result",
+            "type": "array"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ifc_shape_listOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "bd6092a2dea12a9de35f412dfcb8739df3bbe4c78e64934dfbf083011a431397",
+      "inputSchema": {
+        "properties": {
+          "method": {
+            "title": "Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "title": "ifc_shape_docsArguments",
+        "type": "object"
+      },
+      "name": "ifc_shape_docs",
+      "outputSchema": null
+    },
+    {
+      "description_sha256": "707371788ed66bcaa73188f4d62e369aa197baa2a90ad9fc93598c5b3832290a",
+      "inputSchema": {
+        "properties": {
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "params": {
+            "default": "{}",
+            "title": "Params",
+            "type": "string"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "title": "ifc_shapeArguments",
+        "type": "object"
+      },
+      "name": "ifc_shape",
+      "outputSchema": null
+    },
+    {
+      "description_sha256": "5eec9591fd710bb3c89e15eb81b239b2e684fc89a83952b949d99501d33ea985",
+      "inputSchema": {
+        "properties": {
+          "element_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Element Ids"
+          },
+          "height_mm": {
+            "default": 420.0,
+            "title": "Height Mm",
+            "type": "number"
+          },
+          "output_path": {
+            "default": "",
+            "title": "Output Path",
+            "type": "string"
+          },
+          "png_height": {
+            "default": 1024,
+            "title": "Png Height",
+            "type": "integer"
+          },
+          "png_width": {
+            "default": 1024,
+            "title": "Png Width",
+            "type": "integer"
+          },
+          "scale": {
+            "default": 0.01,
+            "title": "Scale",
+            "type": "number"
+          },
+          "selector": {
+            "default": "",
+            "title": "Selector",
+            "type": "string"
+          },
+          "view": {
+            "default": "floorplan",
+            "title": "View",
+            "type": "string"
+          },
+          "width_mm": {
+            "default": 297.0,
+            "title": "Width Mm",
+            "type": "number"
+          }
+        },
+        "title": "ifc_plotArguments",
+        "type": "object"
+      },
+      "name": "ifc_plot",
+      "outputSchema": null
+    },
+    {
+      "description_sha256": "fc239fb4f2b596f885b31e4a52a5c5ba3f3651a340e814713f12b2330b3454f9",
+      "inputSchema": {
+        "properties": {
+          "element_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Element Ids"
+          },
+          "output_path": {
+            "default": "",
+            "title": "Output Path",
+            "type": "string"
+          },
+          "selector": {
+            "default": "",
+            "title": "Selector",
+            "type": "string"
+          },
+          "view": {
+            "default": "iso",
+            "title": "View",
+            "type": "string"
+          }
+        },
+        "title": "ifc_renderArguments",
+        "type": "object"
+      },
+      "name": "ifc_render",
+      "outputSchema": null
+    },
+    {
+      "description_sha256": "0fb1704629a7b2e443fa0406ec30d3fcaeb29a97f3d2aaa39722fc913b2776af",
+      "inputSchema": {
+        "properties": {},
+        "title": "ifc_summaryArguments",
+        "type": "object"
+      },
+      "name": "ifc_summary",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_summaryDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "0c9fd089dbb0742f7f508c91d5c4f5512977d711159e3932fbe6de33b421156f",
+      "inputSchema": {
+        "properties": {},
+        "title": "ifc_unitsArguments",
+        "type": "object"
+      },
+      "name": "ifc_units",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_unitsDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "83163f6b3bf76b08e41064b12a7e1350468a129b1651ee150378d4e5905536c1",
+      "inputSchema": {
+        "properties": {
+          "element_type": {
+            "default": "",
+            "title": "Element Type",
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "storey": {
+            "default": "",
+            "title": "Storey",
+            "type": "string"
+          }
+        },
+        "title": "ifc_treeArguments",
+        "type": "object"
+      },
+      "name": "ifc_tree",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_treeDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "97aa0a839dddf86824d62e6391f63c61d70adbb2b06e5f14fae5109965ef13ae",
+      "inputSchema": {
+        "properties": {
+          "limit": {
+            "default": 100,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "ifc_selectArguments",
+        "type": "object"
+      },
+      "name": "ifc_select",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_selectDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "739b44c56ebcb44777eba6ef8b4687aebbcbda1a63f1589576ad9c434e587600",
+      "inputSchema": {
+        "properties": {
+          "element_id": {
+            "title": "Element Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "element_id"
+        ],
+        "title": "ifc_infoArguments",
+        "type": "object"
+      },
+      "name": "ifc_info",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_infoDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "8eaf366aec4f2b3819d0d8db0a2087486d98b3d46b4d995840e689fa4860ced1",
+      "inputSchema": {
+        "properties": {
+          "element_id": {
+            "title": "Element Id",
+            "type": "integer"
+          },
+          "element_type": {
+            "default": "",
+            "title": "Element Type",
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "traverse": {
+            "default": "",
+            "title": "Traverse",
+            "type": "string"
+          }
+        },
+        "required": [
+          "element_id"
+        ],
+        "title": "ifc_relationsArguments",
+        "type": "object"
+      },
+      "name": "ifc_relations",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Result"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ifc_relationsOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "a6614ebcb0b666855cd5dc2ff06728ec48137791c9f1a12b19d2de2df9488aaa",
+      "inputSchema": {
+        "properties": {
+          "datum": {
+            "default": "",
+            "title": "Datum",
+            "type": "string"
+          },
+          "element_id": {
+            "default": 0,
+            "title": "Element Id",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 50,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "selector": {
+            "default": "",
+            "title": "Selector",
+            "type": "string"
+          }
+        },
+        "title": "ifc_extentArguments",
+        "type": "object"
+      },
+      "name": "ifc_extent",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_extentDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "97106e67676e8ae49a29d7d503fce0a9c0c224dff51ea9e0f2d09ea4e0b6658f",
+      "inputSchema": {
+        "properties": {
+          "element_id": {
+            "default": 0,
+            "title": "Element Id",
+            "type": "integer"
+          },
+          "ids": {
+            "default": "",
+            "title": "Ids",
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "selector": {
+            "default": "",
+            "title": "Selector",
+            "type": "string"
+          }
+        },
+        "title": "ifc_footprintArguments",
+        "type": "object"
+      },
+      "name": "ifc_footprint",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_footprintDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "c30660d31188ba78364280b48702d13e7de4e44f43dbafd4bf23ed17ca87b075",
+      "inputSchema": {
+        "properties": {
+          "element_id": {
+            "default": 0,
+            "title": "Element Id",
+            "type": "integer"
+          },
+          "ids": {
+            "default": "",
+            "title": "Ids",
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "selector": {
+            "default": "",
+            "title": "Selector",
+            "type": "string"
+          }
+        },
+        "title": "ifc_volumeArguments",
+        "type": "object"
+      },
+      "name": "ifc_volume",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_volumeDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "02503fb50dceec75e7e2dcc15ccb31fd31683fcb3bf77699ff05e696a6b6dd2f",
+      "inputSchema": {
+        "properties": {
+          "a": {
+            "title": "A",
+            "type": "string"
+          },
+          "b": {
+            "title": "B",
+            "type": "string"
+          }
+        },
+        "required": [
+          "a",
+          "b"
+        ],
+        "title": "ifc_distanceArguments",
+        "type": "object"
+      },
+      "name": "ifc_distance",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_distanceDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "18ddb96bedcbbfcb9bd0cc1b7caeda525bc0556a0fe071352d1b01e391c9c441",
+      "inputSchema": {
+        "properties": {
+          "around": {
+            "default": "",
+            "title": "Around",
+            "type": "string"
+          },
+          "cut_height": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cut Height"
+          },
+          "depth": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Depth"
+          },
+          "direction": {
+            "default": "",
+            "title": "Direction",
+            "type": "string"
+          },
+          "gridline": {
+            "default": "",
+            "title": "Gridline",
+            "type": "string"
+          },
+          "highlight": {
+            "default": "",
+            "title": "Highlight",
+            "type": "string"
+          },
+          "line": {
+            "default": "",
+            "title": "Line",
+            "type": "string"
+          },
+          "looking": {
+            "default": "",
+            "title": "Looking",
+            "type": "string"
+          },
+          "margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Margin"
+          },
+          "output_path": {
+            "title": "Output Path",
+            "type": "string"
+          },
+          "paper": {
+            "default": "",
+            "title": "Paper",
+            "type": "string"
+          },
+          "png_px": {
+            "default": 2000,
+            "title": "Png Px",
+            "type": "integer"
+          },
+          "scale": {
+            "default": "",
+            "title": "Scale",
+            "type": "string"
+          },
+          "side": {
+            "default": "",
+            "title": "Side",
+            "type": "string"
+          },
+          "storey": {
+            "default": "",
+            "title": "Storey",
+            "type": "string"
+          },
+          "through": {
+            "default": "",
+            "title": "Through",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "view": {
+            "default": "plan",
+            "title": "View",
+            "type": "string"
+          }
+        },
+        "required": [
+          "output_path"
+        ],
+        "title": "ifc_drawArguments",
+        "type": "object"
+      },
+      "name": "ifc_draw",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_drawDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "01ef3171fd1054b8da7b20452ff7b123a574381c35097070127cd1b7d785a114",
+      "inputSchema": {
+        "properties": {
+          "express_rules": {
+            "default": false,
+            "title": "Express Rules",
+            "type": "boolean"
+          },
+          "start": {
+            "default": 0,
+            "title": "Start",
+            "type": "integer"
+          }
+        },
+        "title": "ifc_validateArguments",
+        "type": "object"
+      },
+      "name": "ifc_validate",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_validateDictOutput",
+        "type": "object"
+      }
+    },
+    {
+      "description_sha256": "382572e48c7be0beba7653566887f40d75179234fb0b81d55ec57d3709e4a7f0",
+      "inputSchema": {
+        "properties": {
+          "rule": {
+            "title": "Rule",
+            "type": "string"
+          },
+          "selector": {
+            "default": "",
+            "title": "Selector",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule"
+        ],
+        "title": "ifc_quantifyArguments",
+        "type": "object"
+      },
+      "name": "ifc_quantify",
+      "outputSchema": {
+        "additionalProperties": true,
+        "title": "ifc_quantifyDictOutput",
+        "type": "object"
+      }
+    }
+  ]
+}

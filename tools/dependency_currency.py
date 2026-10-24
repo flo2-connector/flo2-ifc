@@ -14,10 +14,10 @@ reads four things:
   - every requirement in pyproject.toml ([project] dependencies, each
     [project.optional-dependencies] extra, and [build-system] requires),
     against the newest release on PyPI (its JSON API);
-  - the one git pin, ifcmcp on Anthony's fork. For it, the report gives the
-    fork commit, PyPI's latest ifcopenshell-mcp, and whether that release
-    still requires mcp<2. When it no longer does, upstream has caught up and
-    the pin can return to a PyPI release;
+  - for ifcopenshell-mcp, whose tool code flo2-ifc serves on its own MCP SDK
+    2.x server (since 0.4.0), also whether upstream's latest [mcp] extra
+    admits the pinned mcp: when it does, IfcOpenShell's own server has caught
+    up with mcp 2.x. That is reported, never failed;
   - every `uses:` in .github/workflows, against the action's newest release;
   - the Agent Plugins schema version that plugin.json and mcp.json declare,
     against the newest tag of the specification's repository.
@@ -34,6 +34,10 @@ WHAT FAILS, AND WHAT ONLY REPORTS.
     cannot see is not a pass.
   - A requirement that is not pinned exactly FAILS (unpinned). This
     repository exists to hold an exact set; a range drifts by itself.
+  - A requirement installed from a URL (`name @ git+https://...`) FAILS
+    (url_pin). Since 0.4.0 every dependency is a release on PyPI; flo2-ifc no
+    longer installs ifcmcp from a fork, and a URL pin has no release to be
+    checked against.
 
 The report is dated. It goes to stdout, and is appended to
 $GITHUB_STEP_SUMMARY when that is set. --json also writes it as JSON.
@@ -60,9 +64,14 @@ MANIFESTS = ("plugin.json", "mcp.json")
 SPEC_REPO = "agentplugins/agent-plugins-spec"
 USER_AGENT = "flo2-ifc-dependency-currency (github.com/flo2-connector/flo2-ifc)"
 
-FAILING = ("series_owed", "hold_expired", "hold_invalid", "unknown", "unpinned")
-ORDER = ("series_owed", "hold_expired", "hold_invalid", "unknown", "unpinned", "return_to_pypi",
-         "hold_unneeded", "held", "minor_owed", "patch_owed", "fork", "branch_ref", "current")
+FAILING = ("series_owed", "hold_expired", "hold_invalid", "unknown", "unpinned", "url_pin")
+ORDER = ("series_owed", "hold_expired", "hold_invalid", "unknown", "unpinned", "url_pin",
+         "hold_unneeded", "held", "minor_owed", "patch_owed", "branch_ref", "current")
+
+#: The package whose tools flo2-ifc serves on its own server, and the package
+#: of the MCP SDK that server is built on.
+IFCMCP = "ifcopenshell-mcp"
+MCP = "mcp"
 
 Version = tuple[int, int, int]
 
@@ -135,7 +144,6 @@ def admits(specifier: str, v: Version) -> bool | None:
 # ---- what this repository declares --------------------------------------------
 
 REQUIREMENT = re.compile(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^\]]*\])?\s*([^;]*?)\s*(?:;(.*))?$")
-GIT_URL = re.compile(r"git\+https://github\.com/([\w.-]+/[\w.-]+?)(?:\.git)?@([^#\s]+)(?:#(\S*))?$")
 
 
 @dataclass
@@ -243,17 +251,10 @@ def github_latest(slug: str) -> Version | None:
     return max(versions) if versions else None
 
 
-def github_commit(slug: str, sha: str) -> str:
-    """The committer date of `sha` in `slug`. Raises if GitHub does not have it."""
-    commit = json.loads(_get(f"https://api.github.com/repos/{slug}/commits/{sha}"))
-    return commit["commit"]["committer"]["date"]
-
-
 @dataclass
 class Upstream:
     pypi: Callable[[str], dict] = pypi_latest
     github_latest: Callable[[str], Version | None] = github_latest
-    github_commit: Callable[[str, str], str] = github_commit
 
 
 # ---- the verdict --------------------------------------------------------------
@@ -293,47 +294,22 @@ def _behind(row: dict, pinned: Version, latest: Version, holds: list[dict], toda
     return {**row, "state": state, "note": f"{label} ({fmt(latest)}) is out: {note}"}
 
 
-def _git_row(pin: Pin, pins: list[Pin], upstream: Upstream) -> dict:
-    row = {"kind": "git", "name": pin.name, "declared_in": [pin.where]}
-    m = GIT_URL.match(pin.url or "")
-    if not m:
-        return {**row, "pinned": pin.url, "state": "unknown",
-                "note": "not a git+https://github.com/owner/repo@commit URL this check reads"}
-    slug, rev, fragment = m.groups()
-    row["pinned"] = f"{slug}@{rev[:12]}" + (f" ({fragment})" if fragment else "")
-    if not re.fullmatch(r"[0-9a-f]{40}", rev):
-        return {**row, "state": "unpinned", "note": f"`{rev}` is not a full commit id, so it moves by itself"}
-    notes = []
-    try:
-        notes.append(f"fork commit {rev[:12]} on {slug}, committed {upstream.github_commit(slug, rev)}")
-    except Exception as e:  # noqa: BLE001 — reported, and it fails the run
-        return {**row, "state": "unknown", "note": f"GitHub has no commit {rev} on {slug}, or the lookup failed: {e}"}
-    try:
-        latest = upstream.pypi(pin.name)
-    except Exception as e:  # noqa: BLE001
-        return {**row, "state": "unknown", "note": f"PyPI lookup failed: {e}"}
-    row["latest"] = f"{latest['version']} (PyPI)"
-    mcp_pin = next((p.exact for p in pins if p.name == "mcp" and p.exact), None)
-    if mcp_pin is None:
-        return {**row, "state": "unknown", "note": "; ".join(notes + ["no exact mcp pin to judge against"])}
-    mcp_reqs = [r for r in latest["requires_dist"] if (REQUIREMENT.fullmatch(r) or [None])[1] == "mcp"]
-    if not mcp_reqs:
-        notes.append(f"PyPI's ifcopenshell-mcp {latest['version']} declares no mcp requirement; "
-                     f"read it by hand before moving the pin back to PyPI")
-        return {**row, "state": "return_to_pypi", "note": "; ".join(notes)}
-    spec = REQUIREMENT.fullmatch(mcp_reqs[0]).group(3).strip().strip("()").strip()  # type: ignore[union-attr]
+def _upstream_server_note(latest: dict, pins: list[Pin]) -> str:
+    """Whether ifcopenshell-mcp's latest [mcp] extra admits the pinned mcp,
+    that is, whether IfcOpenShell's own server has caught up with mcp 2.x."""
+    mcp_pin = next((p.exact for p in pins if p.name == MCP and p.exact), None)
+    reqs = [r for r in latest["requires_dist"] if (REQUIREMENT.fullmatch(r) or [None, None])[1] == MCP]
+    if mcp_pin is None or not reqs:
+        return f"{IFCMCP} {latest['version']} declares no mcp requirement to compare with the mcp pin; read it by hand"
+    spec = REQUIREMENT.fullmatch(reqs[0]).group(3).strip().strip("()").strip()  # type: ignore[union-attr]
     ok = admits(spec, mcp_pin)
     if ok is None:
-        return {**row, "state": "unknown",
-                "note": "; ".join(notes + [f"its mcp requirement `{spec}` is not one this check reads"])}
+        return f"its mcp requirement `{spec}` is not one this check reads"
     if ok:
-        notes.append(f"PyPI's ifcopenshell-mcp {latest['version']} requires mcp `{spec}`, which admits mcp "
-                     f"{fmt(mcp_pin)}: upstream has caught up, so the fork pin can return to "
-                     f"ifcopenshell-mcp=={latest['version']} (README: moving the pin)")
-        return {**row, "state": "return_to_pypi", "note": "; ".join(notes)}
-    notes.append(f"PyPI's ifcopenshell-mcp {latest['version']} still requires mcp `{spec}` (mcp<2: "
-                 f"yes), so the fork pin stays")
-    return {**row, "state": "fork", "note": "; ".join(notes)}
+        return (f"{IFCMCP} {latest['version']}'s own server now admits mcp {fmt(mcp_pin)} (`{spec}`): "
+                f"IfcOpenShell's server has caught up with mcp 2.x")
+    return (f"{IFCMCP} {latest['version']}'s own server still requires mcp `{spec}`, so flo2-ifc serves its "
+            f"tools on mcp {fmt(mcp_pin)} itself (installed without the [mcp] extra)")
 
 
 def check(repo: Path, upstream: Upstream, today: dt.date) -> dict:
@@ -347,7 +323,9 @@ def check(repo: Path, upstream: Upstream, today: dt.date) -> dict:
                          "state": "unknown", "note": "a requirement this check cannot read"})
             continue
         if pin.url is not None:
-            rows.append(_git_row(pin, pins, upstream))
+            rows.append({"kind": "package", "name": pin.name, "pinned": f"@ {pin.url}", "declared_in": [pin.where],
+                         "state": "url_pin",
+                         "note": "installed from a URL, not a release: pin a PyPI release exactly (==X.Y.Z)"})
             continue
         row = {"kind": "package", "name": pin.name, "pinned": pin.raw.split(";")[0].strip()[len(pin.name):].strip()
                or "(any)", "declared_in": [pin.where]}
@@ -356,15 +334,18 @@ def check(repo: Path, upstream: Upstream, today: dt.date) -> dict:
                          "note": "not pinned exactly (==X.Y.Z): a range drifts by itself"})
             continue
         try:
-            latest = parse_version(upstream.pypi(pin.name)["version"])
+            release = upstream.pypi(pin.name)
         except Exception as e:  # noqa: BLE001 — reported, and it fails the run
             rows.append({**row, "state": "unknown", "note": f"PyPI lookup failed: {e}"})
             continue
+        latest = parse_version(release["version"])
         if latest is None:
             rows.append({**row, "state": "unknown", "note": "PyPI's latest is not a final release this check reads"})
             continue
-        rows.append(_behind(row, pin.exact, latest, holds, today, "package", pin.name,
-                            "move the pin in pyproject.toml"))
+        judged = _behind(row, pin.exact, latest, holds, today, "package", pin.name, "move the pin in pyproject.toml")
+        if pin.name == IFCMCP:
+            judged["note"] = "; ".join(n for n in (judged.get("note"), _upstream_server_note(release, pins)) if n)
+        rows.append(judged)
 
     for slug, use in sorted(declared_actions(repo).items()):
         refs = sorted(use["refs"])

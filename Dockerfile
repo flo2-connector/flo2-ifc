@@ -7,9 +7,10 @@
 #   docker run --rm -i --network none --read-only --user 65534:65534 flo2-ifc
 #
 # PINNED, IN ONE PLACE. The image installs this package and nothing else, so
-# the set it runs is exactly pyproject.toml's: ifcmcp from Anthony's fork at
-# one commit (ported to the MCP Python SDK 2.x; every ifcopenshell-mcp on PyPI
-# so far requires mcp<2), mcp 2.3.0, and the helpers at 0.9.0. ifcmcp leaves
+# the set it runs is exactly pyproject.toml's, every one a release on PyPI:
+# ifcmcp's tool code from ifcopenshell-mcp 0.9.0 without its [mcp] extra
+# (which requires mcp<2), served by flo2-ifc's own server on mcp 2.3.0, and
+# the helpers at 0.9.0. ifcmcp leaves
 # its helpers unpinned, and they decide what a model can measure: with ifc5d
 # 0.9.0 the base-quantities rule measures a room modelled as a plain box, with
 # 0.8.5 it silently skips it (measured on the droplet, 2026-10-02). networkx
@@ -17,13 +18,11 @@
 # its JSON. No pyvista (900 MB; only ifc_render, which flo2's door does not
 # offer, needs it).
 #
-# TWO STAGES. The fork pin is a git URL, so installing needs git; the build
-# stage has it and the image does not. The image gets only the finished
-# environment, copied to the same path on the same base.
+# TWO STAGES. The build stage installs the package from its source; the image
+# gets only the finished environment, copied to the same path on the same
+# base, and not the source. (Since 0.4.0 nothing is installed from git, so
+# neither stage needs git.)
 FROM python:3.12-slim AS build
-RUN apt-get update \
- && apt-get install -y --no-install-recommends git \
- && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY pyproject.toml README.md LICENSE ./
 COPY src/ ./src/
@@ -46,10 +45,11 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /opt/flo2-ifc /opt/flo2-ifc
 ENV PATH=/opt/flo2-ifc/bin:$PATH HOME=/tmp PYTHONDONTWRITEBYTECODE=1
-# The entry point is flo2-ifc: ifcmcp's server with the readers in front of
-# seven of its tools and two added (since flo2-ifc 0.2.0), and the measures
-# and the drawing (since 0.3.0). `ifcmcp` alone,
-# also on PATH, is the fork's server without them.
+# The entry point is flo2-ifc: its own server on mcp 2.x with every one of
+# ifcmcp's tools, the readers in front of seven of them and two added (since
+# flo2-ifc 0.2.0), and the measures and the drawing (since 0.3.0). `ifcmcp`,
+# also on PATH, is upstream's own server, which needs mcp<2: here it answers
+# --version and does not serve.
 RUN flo2-ifc --version && ifcmcp --version \
  && python -c "import cairosvg; assert cairosvg.svg2png(bytestring=b'<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\"><text y=\"3\">a</text></svg>')[:4] == b'\x89PNG'"
 USER 65534:65534
