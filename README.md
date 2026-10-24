@@ -4,11 +4,13 @@ This is a small repository. It holds the exact set of packages that flo2.io inst
 MCP server for IFC building models. That server has 25 tools: load, query, edit, validate, quantify and plot a
 building model. It is published on PyPI as `ifcopenshell-mcp` and licensed LGPL-3.0-or-later.
 
-The repository holds six things:
+The repository holds seven things:
 
 - the pinned set, in `pyproject.toml`;
 - the readers for a whole building, the measures and drawings, and the checks (IDS and buildingSMART's rules), in
   `src/flo2_ifc/` (below);
+- the starting model a chat copies to start a building model from nothing, in
+  `skills/read-a-building-model/references/starting-a-model.md` (since 0.5.1; below, "Starting a model from nothing");
 - the container recipe flo2.io builds, in `Dockerfile`;
 - the plugin, in two formats;
 - a small CI;
@@ -140,6 +142,31 @@ pass and 45 fail, the same 45 with the rules' own `requirements.txt` pins and wi
 to pass: for 43 the rule reported nothing where its test expects it to run, and for 2 (PSE001) it reported an error.
 The cause is not established; both sets share ifcopenshell 0.9.0 from PyPI. The 21 rules concerned are listed in
 `rules.py` (`UPSTREAM_TESTS_NOT_ALL_PASSING`), and a reply flags any of them it ran (`rules_with_a_caveat`).
+
+## Starting a model from nothing (since 0.5.1)
+
+A person designing a building from an idea has no model to upload, so a chat starts one: it writes a small IFC4 file as
+text and keeps it in the design with flo2's file tool, and the building-model helper opens it like any other model
+(flo2's design 1a97fc1f1de4d5d2, `req:a-chat-starts-a-designs-building-model-from-nothing`). Measured on flo2.io on
+2026-10-24, a chat that improvised that text got a model that opened and validated, but nothing said the text was
+right, and nothing would say so tomorrow.
+
+`skills/read-a-building-model/references/starting-a-model.md` is the text a chat copies instead: a project in feet (or,
+with the lines it gives, metres), its 3D context with `Body` and `Axis`, a site on a latitude and longitude, a
+building, its storeys, the relations that join them, and a map projection (`IfcProjectedCRS` and `IfcMapConversion`)
+so buildingSMART's GRF003 passes. It says which values to change and how: a new GlobalId for every rooted entity and
+how a chat makes one, decimal degrees as degrees, minutes, seconds and millionths (south and west negative in every
+part), a storey's height in both its places, the UTM zone and EPSG code, and, plainly, that the easting and northing
+need a map projection a chat must be given or must compute, and what to leave out and say when it cannot.
+
+`tests/test_starting_model.py` takes the IFC text out of the page itself and runs on it what `ifc_validate` (with
+express rules) and `ifc_check_rules` run: as written, with new GlobalIds, in metres, with a third storey and with one,
+there is no error and no warning; with no map projection, the one warning is GRF003. It also checks the page's worked
+numbers (the degrees, minutes and seconds; the easting and northing, against pyproj).
+
+The page is flo2-ifc's half of the skill `read-a-building-model`, which flo2 writes and serves. flo2 serves this page
+beside it as an unchanged copy at the commit it pins, as it serves flo2-calc's references, and its CI compares the two
+byte for byte.
 
 ## Where ifcmcp comes from (since 0.4.0)
 
@@ -287,7 +314,7 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 ## The tests and the checks
 
-`python -m pytest` runs nine test files:
+`python -m pytest` runs ten test files:
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp 2.3.0 client. It checks that:
   - the server initializes as `ifc-mcp`, with instructions;
@@ -322,6 +349,9 @@ uv venv -p 3.12 && uv pip install '.[test]'
   GEM002 by GlobalId and one with a shape passing it, rule sets narrowed, a check out of time going on from `start`,
   and a rule passed over. It needs the rules installed (`tools/ifc_rules.py`, `FLO2_IFC_RULES_DIR`): run locally
   without them it skips, and in CI it fails.
+- `tests/test_starting_model.py` checks the starting model a chat copies (above, "Starting a model from nothing"):
+  each variant the page describes passes `ifc_validate` with express rules and buildingSMART's rules with no error.
+  The rules' half needs them installed, as `tests/test_rules.py` does.
 - `tests/test_manifests.py` validates `plugin.json` and `mcp.json` against the Agent Plugins 1.0.0 schemas copied into
   `tests/schemas/` (`SOURCE.txt` there names the spec commit). It also checks that both formats name the same server,
   command and arguments.

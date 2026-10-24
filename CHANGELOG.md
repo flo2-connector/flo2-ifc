@@ -2,7 +2,25 @@
 
 flo2-ifc's versions, newest first. Versions before 0.3.1 are described in README.md, in the sections marked "since".
 
-## 0.5.0 (unreleased)
+## 0.5.1 (unreleased)
+
+The tools a chat sees are unchanged (names, arguments and descriptions), so this is a patch release.
+
+- **A conversion-based unit is named with its symbol, never "(?)".** A model in feet as Revit writes it (`FOOT`,
+  `SQUARE FOOT`, `CUBIC FOOT`) read "Lengths are in feet (?)" in `ifc_units`' sentence, which flo2 repeats in every
+  reply about the model: IfcOpenShell's `get_unit_symbol` looks a conversion-based unit up by its name exactly as its
+  table spells it (`foot`), and answers `?` otherwise. flo2-ifc now looks it up in any case, as IFC (and buildingSMART's
+  PJS001) compares these names, so it reads "Lengths are in feet (ft)"; a name no table knows is named with no symbol.
+  The measures' `cite` and `ifc_extent`'s `length_unit` say `ft` too, where they said `?`. (flo2's design
+  1a97fc1f1de4d5d2, `req:a-chat-starts-a-designs-building-model-from-nothing`, its fix 3.)
+- **The starting model a chat copies**, `skills/read-a-building-model/references/starting-a-model.md`: an IFC4
+  project in feet or metres, a site on given coordinates, a building, its storeys, the relations, and a map projection
+  so buildingSMART's GRF003 passes; with how to make GlobalIds, write a latitude and longitude, add a storey, and what
+  to do without projected coordinates. `tests/test_starting_model.py` holds every variant it describes to no error under
+  `ifc_validate` with express rules and buildingSMART's rules. flo2 serves it beside its skill `read-a-building-model`.
+  (The same requirement, its fix 2.)
+
+## 0.5.0 (2026-10-24)
 
 Three tools are added, so this is a minor release. Every tool 0.4.0 served is unchanged.
 
