@@ -205,8 +205,8 @@ def silhouette(tri2: np.ndarray, grid: float, front_only: bool = False):
     """The union of 2D triangles (m, 3, 2), snapped to `grid` metres first.
 
     Snapping to a tenth of a millimetre of PAPER loses nothing the sheet can
-    show and joins a detailed fixture's thousands of triangles into few: the
-    Wetmore basement's 350 shapes join in 3.5 s instead of 24 s (2026-10-24).
+    show and joins a detailed fixture's thousands of triangles into few: a large
+    basement's outline joins in 3.5 s instead of 24 s (2026-10-24).
     The snapped corners are already on the grid, so the union itself is not
     snapped again (a quarter faster). `front_only` keeps only the triangles
     wound one way: enough for a CLOSED mesh seen whole, whose outline the
@@ -392,6 +392,80 @@ def _north_arrow(x: float, y: float, north: tuple[float, float] | None) -> list[
     ]
 
 
+# ---------------------------------------------------------------- room labels
+
+#: One room holds another when at least this share of the other's drawn area
+#: lies inside it, and the other is the smaller. Not exact containment: rooms
+#: are drawn snapped to the paper's grid, and a zone traced inside a room
+#: often runs a hair past its edge. Rooms that merely overlap are not nested.
+HOLDS_SHARE = 0.9
+
+#: How wide a character of a room's label is, as a share of its font size, on
+#: the generous side (DejaVu Sans averages about 0.6 em, bold about 0.65).
+_EM_BOLD, _EM = 0.7, 0.62
+#: Paper kept clear around a label, in millimetres.
+_LABEL_PAD = 0.6
+
+
+def _room_name(sp: ifcopenshell.entity_instance) -> str:
+    return " ".join(t for t in (sp.Name, getattr(sp, "LongName", None)) if t)
+
+
+def rooms_inside(room_shapes: list[tuple[Any, Any, float]]) -> list[list[int]]:
+    """For each room drawn, the indices of the rooms it holds (HOLDS_SHARE of their drawn area inside it)."""
+    polys = [p for _, p, _ in room_shapes]
+    areas = [p.area for p in polys]
+    held: list[list[int]] = [[] for _ in polys]
+    for i, outer in enumerate(polys):
+        for j, inner in enumerate(polys):
+            if i == j or areas[j] <= 0 or areas[j] >= areas[i]:
+                continue
+            if not outer.intersects(inner):
+                continue
+            if outer.intersection(inner).area >= HOLDS_SHARE * areas[j]:
+                held[i].append(j)
+    return held
+
+
+def label_point(free, name: str, area_text: str, k: float):
+    """Where a label fits wholly inside `free` (a room's part clear of the rooms it holds), or None.
+
+    The label is the name in bold at 2.4 mm and, in a plan, its area at 2.0 mm
+    3 mm below; its anchor is the middle of the name's baseline, as drawn. Of
+    the places it fits, the one farthest from the edges of `free` is taken,
+    and of those the nearest the middle of its part.
+    `k` is paper millimetres per metre."""
+    import shapely
+    from shapely.ops import polylabel
+
+    if free.is_empty or free.area <= 0:
+        return None
+    w = max(len(name) * 2.4 * _EM_BOLD, len(area_text) * 2.0 * _EM) + 2 * _LABEL_PAD
+    above = 2.4 * 0.8 + _LABEL_PAD
+    below = (3.0 + 2.0 * 0.25 if area_text else 2.4 * 0.25) + _LABEL_PAD
+    half_w, half_h, rise = w / 2 / k, (above + below) / 2 / k, (above - below) / 2 / k  # metres; rise: the box's middle above the anchor
+    pieces = [g for g in getattr(free, "geoms", [free]) if g.geom_type == "Polygon" and g.area > 0]
+    step = 0.5 / k  # clearances within half a millimetre of paper are as good as each other
+    best = None
+    for piece in pieces:
+        x0, y0, x1, y1 = piece.bounds
+        if x1 - x0 < 2 * half_w or y1 - y0 < 2 * half_h:
+            continue
+        # Its middle, as any other room's label takes it; polylabel when the centroid falls outside.
+        middle = piece.centroid if piece.contains(piece.centroid) else polylabel(piece, tolerance=min(half_w, half_h) / 4)
+        n = 24
+        centres = [middle] + [shapely.Point(x0 + (x1 - x0) * (a + 0.5) / n, y0 + (y1 - y0) * (b + 0.5) / n) for a in range(n) for b in range(n)]
+        for c in centres:
+            box = shapely.box(c.x - half_w, c.y - half_h, c.x + half_w, c.y + half_h)
+            if not piece.covers(box):
+                continue
+            # Farthest from the edges first; of those, nearest the middle of its part.
+            score = (math.floor(piece.boundary.distance(box) / step), -c.distance(middle))
+            if best is None or score > best[0]:
+                best = (score, shapely.Point(c.x, c.y - rise))
+    return None if best is None else best[1]
+
+
 # ---------------------------------------------------------------- drawing
 
 
@@ -461,7 +535,7 @@ def draw(
     spaces: list[ifcopenshell.entity_instance] = []
     if view == "plan":
         if not storey.strip():
-            raise ValueError("A plan is of one storey: name it with `storey` (ifc_tree lists them, e.g. \"BASEMENT FLR\").")
+            raise ValueError("A plan is of one storey: name it with `storey` (ifc_tree lists them, e.g. \"Level 1\").")
         st = reading.find_storey(model, storey)
         z0 = storey_z_m(model, st)
         cut = to_m(cut_height) if cut_height is not None else 1.2
@@ -709,14 +783,24 @@ def draw(
         if open_:
             svg.append(f'<path class="{hl}cutline" {_attrs(e)} d="{"".join(_path(g, k, ox, oy) for g in open_)}"/>')
     svg.append('</g><g id="labels">')
-    for sp, poly, area in room_shapes:
-        pt = poly.centroid if poly.contains(poly.centroid) else poly.representative_point()
-        x, y = ox + pt.x * k, oy - pt.y * k
-        name = " ".join(t for t in (sp.Name, getattr(sp, "LongName", None)) if t)
+    unlabelled: list[dict[str, Any]] = []
+    for (sp, poly, area), held in zip(room_shapes, rooms_inside(room_shapes)):
+        name = _room_name(sp)
         a = u.area_of(area)
+        area_text = f"{a['square_metres']:,.1f} m² ({a['square_feet']:,.0f} ft²)" if view == "plan" else ""
+        if held:
+            # A room that holds others is named in its part clear of them, or not on the sheet at all.
+            pt = label_point(poly.difference(shapely.union_all([room_shapes[j][1] for j in held])), name, area_text, k)
+            if pt is None:
+                inner = [_room_name(room_shapes[j][0]) or f"#{room_shapes[j][0].id()}" for j in held]
+                unlabelled.append({"id": sp.id(), "name": name, "global_id": getattr(sp, "GlobalId", None), "contains": inner})
+                continue
+        else:
+            pt = poly.centroid if poly.contains(poly.centroid) else poly.representative_point()
+        x, y = ox + pt.x * k, oy - pt.y * k
         svg.append(_text(x, y, name, 2.4, "middle", "bold", halo=True))
-        if view == "plan":
-            svg.append(_text(x, y + 3.0, f"{a['square_metres']:,.1f} m² ({a['square_feet']:,.0f} ft²)", 2.0, "middle", halo=True))
+        if area_text:
+            svg.append(_text(x, y + 3.0, area_text, 2.0, "middle", halo=True))
     if levels:
         x0, x1 = MARGIN_MM, pw - MARGIN_MM - label_room + 2
         for name, z in levels:
@@ -781,6 +865,14 @@ def draw(
             out["highlight_withheld"] = len(highlighted) - 50
     if view != "plan":
         out["looking"] = {"toward": [round(float(x), 4) for x in v.toward[:2]], "right": [round(float(x), 4) for x in v.right[:2]]}
+    if unlabelled:
+        out["unlabelled_rooms"] = unlabelled
+        for r in unlabelled:
+            inner = r["contains"]
+            notes.append(
+                f"Not named on the sheet: {r['name'] or 'a room'} (#{r['id']}). It holds {len(inner)} other room(s) ({', '.join(inner[:6])}{', ...' if len(inner) > 6 else ''}), "
+                "and the part of it clear of them has no space for its name."
+            )
     tn = _true_north(model)
     if tn and abs(tn[0]) > 1e-6:
         notes.append(f"The model's true north is ({tn[0]:g}, {tn[1]:g}), not its +y: north, south, east and west here are the model's own axes.")

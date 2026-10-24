@@ -141,3 +141,119 @@ def test_a_bad_view_or_paper_is_refused(site, tmp_path):
         D.draw(site, str(tmp_path / "x"), view="plan", storey="GROUND", paper="B5")
     with pytest.raises(ValueError, match="one storey"):
         D.draw(site, str(tmp_path / "x"), view="plan")
+
+
+# ---------------------------------------------------------------- a room that holds other rooms
+
+SVG = "{http://www.w3.org/2000/svg}"
+
+
+def room_boxes(root):
+    """Each room's outline on the paper, by its name: (x0, y0, x1, y1) in millimetres."""
+    names = {}
+    for p in paths(root, "room"):
+        xy = [float(v) for v in re.findall(r"-?\d+\.\d+", p.get("d"))]
+        names[p.get("data-id")] = (min(xy[0::2]), min(xy[1::2]), max(xy[0::2]), max(xy[1::2]))
+    return names
+
+
+def labels(root):
+    """Each label's name and anchor on the paper, halo left out: {name: (x, y)}."""
+    group = next(g for g in root.iter(f"{SVG}g") if g.get("id") == "labels")
+    out = {}
+    for t in group.iter(f"{SVG}text"):
+        if "stroke" in (t.get("style") or "") or t.get("font-weight") != "bold":
+            continue
+        out["".join(t.itertext())] = (float(t.get("x")), float(t.get("y")))
+    return out
+
+
+def ids(model):
+    return {s.Name: str(s.id()) for s in model.by_type("IfcSpace")}
+
+
+def test_a_room_that_holds_others_is_named_in_its_part_clear_of_them(tmp_path):
+    # The hall holds rooms A and B along its west end; its east end, 4 x 6 m, is clear.
+    m = models.rooms_on_a_floor([("Hall", (0, 0, 10, 6)), ("Room A", (0, 0, 3, 6)), ("Room B", (3, 0, 6, 6))])
+    out = D.draw(m, str(tmp_path / "plan"), view="plan", storey="Level 1", scale="1:50")
+    root = svg_of(out)
+    box, at, n = room_boxes(root), labels(root), ids(m)
+    hall = box[n["Hall"]]
+    east_of_b = box[n["Room B"]][2]
+    x, y = at["Hall"]
+    assert east_of_b < x < hall[2] and hall[1] < y < hall[3]  # in the clear part, not over A's or B's name
+    assert x == pytest.approx((east_of_b + hall[2]) / 2, abs=0.5) and y == pytest.approx((hall[1] + hall[3]) / 2, abs=2.0)  # in its middle
+    for room in ("Room A", "Room B"):  # theirs stay in the middle of each
+        b = box[n[room]]
+        assert at[room] == pytest.approx(((b[0] + b[2]) / 2, (b[1] + b[3]) / 2), abs=0.05)
+    assert "unlabelled_rooms" not in out
+    assert out["elements"]["rooms"] == 3
+
+
+def test_a_room_with_no_part_clear_for_its_name_is_left_unnamed_and_the_reply_says_so(tmp_path):
+    # The hall is tiled by A and B: there is nowhere to name it but on top of them.
+    m = models.rooms_on_a_floor([("Hall", (0, 0, 6, 6)), ("Room A", (0, 0, 3, 6)), ("Room B", (3, 0, 6, 6))])
+    out = D.draw(m, str(tmp_path / "plan"), view="plan", storey="Level 1")
+    root = svg_of(out)
+    assert set(labels(root)) == {"Room A", "Room B"}
+    assert [p.get("data-id") for p in paths(root, "room")].count(ids(m)["Hall"]) == 1  # still outlined
+    assert out["unlabelled_rooms"] == [{"id": int(ids(m)["Hall"]), "name": "Hall", "global_id": m.by_type("IfcSpace")[0].GlobalId, "contains": ["Room A", "Room B"]}]
+    assert any(note.startswith("Not named on the sheet: Hall") and "Room A, Room B" in note for note in out["notes"])
+
+
+def test_holding_is_most_of_a_room_not_all_of_it(tmp_path):
+    # Room B runs 0.2 m past the hall's south edge: 96% of it is inside, so the hall holds it.
+    m = models.rooms_on_a_floor([("Hall", (0, 0.2, 6, 6)), ("Room A", (0, 0.2, 3, 6)), ("Room B", (3, 0, 6, 6))])
+    out = D.draw(m, str(tmp_path / "plan"), view="plan", storey="Level 1")
+    assert [r["name"] for r in out.get("unlabelled_rooms", [])] == ["Hall"]
+    # Rooms that only overlap (half of B in A) hold nothing: both are named where they always were.
+    m = models.rooms_on_a_floor([("Room A", (0, 0, 6, 6)), ("Room B", (3, 0, 9, 6))])
+    out = D.draw(m, str(tmp_path / "plan2"), view="plan", storey="Level 1")
+    root = svg_of(out)
+    box, at, n = room_boxes(root), labels(root), ids(m)
+    for room in ("Room A", "Room B"):
+        b = box[n[room]]
+        assert at[room] == pytest.approx(((b[0] + b[2]) / 2, (b[1] + b[3]) / 2), abs=0.05)
+    assert "unlabelled_rooms" not in out
+
+
+def test_rooms_that_hold_none_are_named_where_they_always_were(tmp_path):
+    # No room inside another: each name sits at its room's middle, as before rooms could be nested.
+    m = models.rooms_on_a_floor([("Room A", (0, 0, 4, 6)), ("Room B", (4, 0, 7, 3)), ("Room C", (4, 3, 7, 6)), ("Room D", (7, 0, 12, 6))])
+    out = D.draw(m, str(tmp_path / "plan"), view="plan", storey="Level 1")
+    root = svg_of(out)
+    box, at, n = room_boxes(root), labels(root), ids(m)
+    assert set(at) == {"Room A", "Room B", "Room C", "Room D"}
+    for room in at:
+        b = box[n[room]]
+        assert at[room] == pytest.approx(((b[0] + b[2]) / 2, (b[1] + b[3]) / 2), abs=0.05)
+    assert "unlabelled_rooms" not in out and "notes" not in out
+
+
+def test_a_section_names_a_room_that_holds_others_the_same_way(tmp_path):
+    m = models.rooms_on_a_floor([("Hall", (0, 0, 6, 6)), ("Room A", (0, 0, 3, 6)), ("Room B", (3, 0, 6, 6))])
+    out = D.draw(m, str(tmp_path / "sec"), view="section", line="-1000, 3000, 13000, 3000", looking="north")
+    assert set(labels(svg_of(out))) >= {"Room A", "Room B"} and "Hall" not in labels(svg_of(out))
+    assert [r["name"] for r in out["unlabelled_rooms"]] == ["Hall"]
+
+
+def test_a_freed_models_meshes_are_forgotten_with_it(tmp_path):
+    # The meshes are kept by (id(model), element id). Python gives a freed
+    # object's id to the next one made, so a model built after another was freed
+    # could be drawn with the first one's meshes: with these tests in one run,
+    # a hall tiled by two rooms was drawn with an earlier hall's clear east end
+    # (seen 2026-10-24: 8 of 30 such pairs in a loop). The server forgets every
+    # mesh when its model changes (server._watch_changes); this pins that a
+    # model's meshes also go when the model itself does, whoever made it.
+    import gc
+
+    from flo2_ifc import geometry as G
+
+    m = models.rooms_on_a_floor([("Hall", (0, 0, 6, 6))])
+    D.draw(m, str(tmp_path / "plan"), view="plan", storey="Level 1")
+    key = id(m)
+    assert any(k[0] == key for k in G._cache)
+    del m
+    gc.collect()
+    assert not any(k[0] == key for k in G._cache)
+    assert not any(k[0] == key for k in G._closures)

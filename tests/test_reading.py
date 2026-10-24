@@ -1,7 +1,7 @@
 """The readers for a whole building (src/flo2_ifc/reading.py), on synthetic models.
 
-Each test pins one problem the first real Revit export showed on 2026-10-23
-(165,111 entities, millimetres), at a size the tests can build in a second:
+Each test pins one problem a large building model showed on 2026-10-23, at a
+size the tests can build in a second:
 a listing too large for one reply, no element extent, a room that did not say
 its storey, a validation longer than one call, and a units note that said
 "usually metres". No real model is a fixture here (tests/models.py).

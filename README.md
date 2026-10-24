@@ -19,16 +19,15 @@ since 0.3.0 **measures and drawings to scale** on the same layer.
 
 ## The readers for a whole building (since 0.2.0)
 
-The first real Revit export read through flo2 (IFC4, 165,111 entities, lengths in millimetres, 2026-10-23) showed five
-problems. A chat holds about 29,000 characters in one reply, and stops waiting at about 60 s:
+A large building model read through flo2 (2026-10-23) showed five problems. A chat holds about 29,000 characters in one reply, and stops waiting at about 60 s:
 
-| ifcmcp's tool | On that model | flo2-ifc's reader |
+| ifcmcp's tool | On a large model | flo2-ifc's reader |
 |---|---|---|
-| `ifc_tree` | 230,618 characters | places in full, each with its elements counted by class; elements a page at a time, filtered by `storey` and `element_type` |
-| `ifc_relations` on a storey | up to 167,000 characters | each long list paged (`offset`, `limit`) and filtered by `element_type`; `lists` says what was withheld |
-| `ifc_select` "IfcWall" | 110,811 characters | sorted, a page at a time, with `counts`; the tool text says `location = "<storey>"` selects by storey |
+| `ifc_tree` | over 200,000 characters | places in full, each with its elements counted by class; elements a page at a time, filtered by `storey` and `element_type` |
+| `ifc_relations` on a storey | over 150,000 characters | each long list paged (`offset`, `limit`) and filtered by `element_type`; `lists` says what was withheld |
+| `ifc_select` "IfcWall" | over 100,000 characters | sorted, a page at a time, with `counts`; the tool text says `location = "<storey>"` selects by storey |
 | `ifc_info` on a room | no storey (a room is part of its storey, not contained in it) | adds `storey`, found through containment or aggregation, with the path |
-| `ifc_validate` | 105 s, one call | checks as much as one call allows (30 s), says `complete` and `next_start`; the schema's rules run in a forked child that is stopped at the call's time |
+| `ifc_validate` | over 100 s, one call | checks as much as one call allows (30 s), says `complete` and `next_start`; the schema's rules run in a forked child that is stopped at the call's time |
 | (none) | no way to say how high the roof is | `ifc_extent`: bounding boxes from the geometry, in the model's unit, metres, and feet and inches |
 | (none) | replies said lengths were "usually metres" | `ifc_units`, and `units` in every reply that carries a length, area or volume |
 
@@ -42,21 +41,20 @@ upstreamable changes; that is a separate decision.
 
 The limits are set by the environment: `FLO2_IFC_PAGE_CHARS` (20,000 characters of JSON in one listing),
 `FLO2_IFC_SECONDS` (30 s of measuring or checking in one call), `FLO2_IFC_GEOMETRY_LIBRARY`
-(`hybrid-cgal-simple-opencascade`: the Wetmore model's 84 doors took 86 s with IfcOpenShell's default library and
-1.8 s with this one) and `FLO2_IFC_GEOMETRY_BATCH` (250 elements per geometry iterator: one iterator over the whole
+(`hybrid-cgal-simple-opencascade`: a large model's doors took 86 s with IfcOpenShell's default library and 1.8 s
+with this one) and `FLO2_IFC_GEOMETRY_BATCH` (250 elements per geometry iterator: one iterator over a whole large
 model peaked at 1.18 GB, over flo2's 1 GiB cap; batches of 250 peak at 390 MB).
 
 ## Measures and drawings (since 0.3.0)
 
-Phase 2 of the Wetmore proof of concept: a chat measures a building model and draws it to scale. Seth explores taking
-out the basement storage and the two east basement units; Alex must end with drawings of his shop to scale. Each tool
-reads the elements' triangle meshes, as IfcOpenShell's geometry iterator makes them (world coordinates), in
+A chat measures a building model and draws it to scale, so a person can explore a change to a building and end with
+drawings of it to scale. Each tool reads the elements' triangle meshes, as IfcOpenShell's geometry iterator makes them (world coordinates), in
 `src/flo2_ifc/geometry.py` and `src/flo2_ifc/drawing.py`:
 
 | Tool | What it gives |
 |---|---|
 | `ifc_footprint` | each element's footprint (its shape projected onto plan), and the SET's, in which what is stacked counts once (`stacked_overlap` says how much) |
-| `ifc_volume` | the volume of each CLOSED mesh, and their total; an OPEN mesh is named in `not_closed` and refused, because what it encloses depends on where it is measured from (the Wetmore roofs' stored volumes are exactly that fault) |
+| `ifc_volume` | the volume of each CLOSED mesh, and their total; an OPEN mesh is named in `not_closed` and refused, because what it encloses depends on where it is measured from (a roof's stored volume can be exactly that fault) |
 | `ifc_extent` `datum` | heights above a storey's level or a given height (`above_datum`) |
 | `ifc_distance` | the shortest gap between two elements' surfaces with the two closest points (exact over every corner, edge and triangle), the box gaps and the centres |
 | `ifc_draw` | a plan of a storey at a cut height, a section along a line, a grid line or through named elements, or an elevation of one side, as an SVG in millimetres of paper and a PNG, to a stated scale written on the sheet with the model's unit and a scale bar in metres and feet; `highlight` draws elements in orange |
@@ -79,13 +77,20 @@ fixture's thousands of triangles into few. Rooms are outlined and named, with th
 elevation marks each storey's level. The scale, when none is given, is the largest of the architect's and the metric
 scales that fits the sheet.
 
-**The meshes are kept** for the session (`FLO2_IFC_MESH_CACHE_MB`, 256 MB; the whole Wetmore model's are about
-23 MB), so a second drawing or measure of the same elements does not make them again, and they are forgotten whenever
+**A room that holds other rooms** (since 0.3.1), such as a whole floor's room with zones traced inside it, is named in
+its part clear of them, where its name fits whole, and otherwise not named on the sheet: the reply lists it in
+`unlabelled_rooms` and says so in `notes`, so the chat can tell the person. One room holds another when at least 90%
+of the other's drawn area lies inside it and the other is the smaller (`HOLDS_SHARE` in `drawing.py`): a zone traced a
+hair past its room's edge still counts, and rooms that merely overlap do not. The names of rooms that hold none stay
+where they always were. A section names the rooms it cuts the same way.
+
+**The meshes are kept** for the session (`FLO2_IFC_MESH_CACHE_MB`, 256 MB; a large building model's all fit
+in it), so a second drawing or measure of the same elements does not make them again, and they are forgotten whenever
 the session's model changes (an edit, a shape, a reload: `server._watch_changes`). A drawing that runs out of
 `FLO2_IFC_SECONDS` stops with `partial` and keeps what it made: the same call again goes on.
 
-Measured on a local copy of the Wetmore model in the image under flo2's flags (1 CPU, 1 GiB, 2026-10-24): the basement
-plan in 8.0 s; the section through the east units, which makes the shapes of the whole building first, in two calls
+Measured on a large building model in the image under flo2's flags (1 CPU, 1 GiB, 2026-10-24): one storey's plan in
+8.0 s; a section, which makes the shapes of the whole building first, in two calls
 (30.0 s, partial, then 21.9 s), and 21.5 s once its shapes are kept; every measure 0.1 s or less once the shapes are
 made; memory at most about 481 MiB (sampled).
 

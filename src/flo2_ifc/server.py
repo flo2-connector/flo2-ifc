@@ -158,7 +158,7 @@ def build_server() -> Any:
         a time in tree order. A storey says its stored ``elevation`` and its
         placed ``z``, in the model's length unit.
 
-        :param storey: One storey only, by its id or its name (e.g. "1ST FLR").
+        :param storey: One storey only, by its id or its name (e.g. "Level 1").
         :param element_type: List only elements of this IFC class (e.g. "IfcDoor").
         :param offset: Where the page of elements starts (the reply's
             ``elements_page.next_offset`` gets the next one).
@@ -175,8 +175,8 @@ def build_server() -> Any:
 
         Selectors: ``IfcWall``; ``IfcWall, IfcDoor``; ``IfcWall, Name = "W1"``;
         ``type = "Concrete Wall"``; ``material = "Concrete"``; and BY PLACE,
-        ``IfcDoor, location = "1ST FLR"`` (the doors on the storey named 1ST
-        FLR; a space or building name works too).
+        ``IfcDoor, location = "Level 1"`` (the doors on the storey named
+        Level 1; a space or building name works too).
 
         :param query: The selector.
         :param offset: Where the page starts (the reply's ``page.next_offset``).
@@ -234,7 +234,7 @@ def build_server() -> Any:
         ``partial`` and what it measured. Reads only.
 
         :param selector: Which elements, as ifc_select takes it (e.g. "IfcRoof"
-            or 'IfcDoor, location = "1ST FLR"').
+            or 'IfcDoor, location = "Level 1"').
         :param element_id: Or one element, by its id.
         :param offset: Where the page of elements starts.
         :param limit: How many elements' boxes to list (default 50).
@@ -262,9 +262,9 @@ def build_server() -> Any:
         only.
 
         :param selector: Which elements, as ifc_select takes it (e.g.
-            'IfcSlab, location = "1ST FLR"').
+            'IfcSlab, location = "Level 1"').
         :param ids: Or elements by step id or GlobalId, comma separated
-            (e.g. "143331, 143377").
+            (e.g. "1203, 1247").
         :param element_id: Or one element, by its id.
         :param offset: Where the page of elements starts.
         :param limit: How many elements' own footprints to list (default 50).
@@ -331,8 +331,10 @@ def build_server() -> Any:
         line, or an ELEVATION of one side; written as ``output_path``.svg (in
         millimetres of paper, so it prints at its scale) and ``output_path``.png.
         What a plane cuts is drawn dark, what lies beyond (or below, in a
-        plan) as seen, nearer over farther; rooms are outlined and named; a
-        section or elevation marks each storey's level. The sheet states the
+        plan) as seen, nearer over farther; rooms are outlined and named (a
+        room that holds other rooms is named clear of them, or, where its name
+        does not fit, left unnamed and listed in ``unlabelled_rooms`` and
+        ``notes``); a section or elevation marks each storey's level. The sheet states the
         scale, the model's unit, a scale bar in metres and in feet, and the
         model file it was drawn from. ``highlight`` draws elements in orange
         (for what a change touches). Lengths and positions you give are in the

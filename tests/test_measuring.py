@@ -1,6 +1,6 @@
 """The measures (src/flo2_ifc/geometry.py), on a synthetic model whose sizes are known.
 
-Phase 2 of the Wetmore proof of concept (req:a-chat-measures-and-draws-a-designs-building-model):
+A chat measures a building model (req:a-chat-measures-and-draws-a-designs-building-model):
 a footprint with stacked items counted once, a volume that refuses an open
 mesh, the height above a datum, and the distance between two elements, each
 with what a calculation needs to cite it. No real model is a fixture here

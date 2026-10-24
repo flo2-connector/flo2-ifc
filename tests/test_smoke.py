@@ -148,7 +148,7 @@ def test_the_readers_take_their_paging_and_filter_arguments(served):
 
 
 def test_a_millimetre_house_reads_whole_through_the_server(served):
-    assert "165" not in served["load"] and "IFC4" in served["load"]
+    assert "IFC4" in served["load"]
     assert served["units"]["length"]["symbol"] == "mm"
     assert served["tree"]["elements_page"]["listed"] == 2 and "more" in served["tree"]
     assert [e["name"] for e in served["doors"]["elements"]] == ["Front door"]

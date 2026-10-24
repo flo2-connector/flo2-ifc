@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools==84.0.0"]
+requires = ["setuptools==84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "flo2-ifc"
-version = "0.3.0"
+version = "0.3.1"
 description = "The exact ifcmcp set flo2.io runs: IfcOpenShell's MCP server for IFC building models, on the MCP Python SDK 2.x, pinned."
 readme = "README.md"
 requires-python = ">=3.12"

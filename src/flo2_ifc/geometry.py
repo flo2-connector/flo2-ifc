@@ -12,9 +12,9 @@ metres, and in feet and inches.
   wall) once. The reply gives the sum of each element's own footprint too, and
   the difference is what was stacked.
 - A VOLUME is a solid's only when its mesh is CLOSED. The volume of an open
-  mesh depends on where it is taken from (2026-10-23: the Wetmore model's
-  roofs store volumes larger than their own bounding boxes, the signed volume
-  of their open meshes in world coordinates). So an open mesh is named and its
+  mesh depends on where it is taken from (2026-10-23: a model's roofs were
+  seen to store volumes larger than their own bounding boxes, the signed
+  volume of their open meshes in world coordinates). So an open mesh is named and its
   volume refused, never summed.
 - A DISTANCE is the shortest gap between two elements' surfaces, with the two
   closest points, and the gap between their boxes along each axis.
@@ -31,6 +31,7 @@ import hashlib
 import math
 import os
 import time
+import weakref
 from dataclasses import dataclass
 from typing import Any
 
@@ -62,8 +63,8 @@ class Mesh:
 
 
 #: Megabytes of meshes a session keeps between calls, so a second drawing or
-#: measure of the same elements does not mesh them again. Every mesh of the
-#: Wetmore model (2,186 shapes) is about 60 MB (measured 2026-10-24).
+#: measure of the same elements does not mesh them again. Every mesh of a
+#: large building model is some tens of MB (measured 2026-10-24).
 CACHE_MB = float(os.environ.get("FLO2_IFC_MESH_CACHE_MB", "256"))
 
 #: Bumped whenever the session's model may have changed (server.py: an edit, a
@@ -87,11 +88,35 @@ def generation() -> int:
     return _generation
 
 
+#: A finalizer per model with kept meshes. The meshes are kept by id(model),
+#: and Python gives a freed object's id to the next one made: without this, a
+#: model made after another was freed could be measured or drawn with the
+#: first one's meshes (seen in the tests 2026-10-24). The server also forgets
+#: every mesh when its model changes (changed()); this does not rely on that.
+_owners: dict[int, weakref.finalize] = {}
+
+
+def _forget_model(key: int) -> None:
+    """A model was freed: drop its meshes and closures before its id is reused."""
+    global _cache_bytes
+    _owners.pop(key, None)
+    for k in [k for k in list(_cache) if k[0] == key]:
+        mesh = _cache.pop(k, None)
+        if mesh is not None:
+            _cache_bytes -= mesh.nbytes
+    for k in [k for k in list(_closures) if k[0] == key]:
+        _closures.pop(k, None)
+    _cache_bytes = max(_cache_bytes, 0)
+
+
 def _keep(model: ifcopenshell.file, mesh: Mesh) -> None:
     global _cache_bytes
     if _cache_bytes + mesh.nbytes > CACHE_MB * 1024 * 1024:
         return
-    _cache[(id(model), mesh.id)] = mesh
+    key = id(model)
+    if key not in _owners:
+        _owners[key] = weakref.finalize(model, _forget_model, key)
+    _cache[(key, mesh.id)] = mesh
     _cache_bytes += mesh.nbytes
 
 
@@ -99,9 +124,9 @@ def meshes(model: ifcopenshell.file, elements: list[ifcopenshell.entity_instance
     """Each element's mesh, by id, made once a session, and whether time ran out.
 
     Elements with no 3D shape are left out. Openings are not subtracted: a
-    Revit export's meshes come with their openings already cut (the Wetmore
-    basement's 350 shapes have the same triangles either way), and the boolean
-    work would cost time for nothing."""
+    Revit export's meshes come with their openings already cut (a large
+    model's shapes were measured to have the same triangles either way), and
+    the boolean work would cost time for nothing."""
     import ifcopenshell.geom
 
     out: dict[int, Mesh] = {}
@@ -146,7 +171,7 @@ def choose(model: ifcopenshell.file, selector: str = "", ids: str = "", element_
     """The elements a call is about: a selector, a list of ids, one id, or several of these.
 
     ``ids`` is step ids or GlobalIds, separated by commas or spaces, such as
-    ``"143331, 143377"`` or ``"0xnSUYaXD6$PrJkKE7Q0Uk"``. Returns the elements,
+    ``"1203, 1247"`` or ``"2N1qx4tVn5RQ7hPZbG0Kd8"``. Returns the elements,
     sorted by id, and how the call named them."""
     found: dict[int, ifcopenshell.entity_instance] = {}
     said: list[str] = []
@@ -173,7 +198,7 @@ def choose(model: ifcopenshell.file, selector: str = "", ids: str = "", element_
             found[e.id()] = e
         said.append(selector.strip())
     if not said:
-        raise ValueError("Name what to measure: `selector` (such as 'IfcSlab, location = \"1ST FLR\"'), `ids` (step ids or GlobalIds), or `element_id`.")
+        raise ValueError("Name what to measure: `selector` (such as 'IfcSlab, location = \"Level 1\"'), `ids` (step ids or GlobalIds), or `element_id`.")
     return [found[k] for k in sorted(found)], " + ".join(said)
 
 
