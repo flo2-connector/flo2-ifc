@@ -45,6 +45,48 @@ def test_units_are_read_from_the_model_not_assumed(house):
     assert "usually" not in u["say"]
 
 
+def _feet_model(names: tuple[str, str, str]):
+    """A model in feet, its conversion-based units named `names` (length, area, volume)."""
+    import ifcopenshell.api
+
+    run = ifcopenshell.api.run
+    f = run("project.create_file", version="IFC4")
+    run("root.create_entity", f, ifc_class="IfcProject", name="feet")
+    units = [run("unit.add_conversion_based_unit", f, name=n) for n in ("foot", "square foot", "cubic foot")]
+    for unit, name in zip(units, names):
+        unit.Name = name
+    run("unit.assign_unit", f, units=units)
+    return f
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        # As Revit writes them, and as a chat wrote them on flo2.io (2026-10-24), when every reply said "feet (?)".
+        ("FOOT", "SQUARE FOOT", "CUBIC FOOT"),
+        # As IFC's own table names them.
+        ("foot", "square foot", "cubic foot"),
+    ],
+)
+def test_a_conversion_based_unit_is_named_with_its_symbol_never_a_question_mark(names):
+    u = R.units(_feet_model(names))
+    assert u["length"]["name"] == "foot" and u["length"]["symbol"] == "ft"
+    assert u["length"]["si_per_unit"] == pytest.approx(0.3048)
+    assert (u["area"]["symbol"], u["volume"]["symbol"]) == ("ft2", "ft3")
+    assert u["say"] == "Lengths are in feet (ft), areas in square feet and volumes in cubic feet, as the model declares them."
+    assert "?" not in u["say"]
+
+
+def test_a_conversion_based_unit_with_no_known_symbol_is_named_without_one():
+    f = _feet_model(("FOOT", "SQUARE FOOT", "CUBIC FOOT"))
+    unit = next(x for x in f.by_type("IfcConversionBasedUnit") if x.UnitType == "LENGTHUNIT")
+    unit.Name = "SMOOT"  # 1.7018 m; not in IFC's table, so no symbol is known for it
+    u = R.units(f)
+    assert u["length"]["name"] == "smoot" and u["length"]["symbol"] is None
+    assert u["say"].startswith("Lengths are in smoots, areas in square feet")
+    assert "?" not in u["say"] and "()" not in u["say"]
+
+
 def test_a_model_with_no_unit_assignment_says_so():
     import ifcopenshell
 

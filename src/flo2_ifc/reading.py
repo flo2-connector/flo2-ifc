@@ -59,12 +59,28 @@ def _unit_entry(model: ifcopenshell.file, unit_type: str) -> dict[str, Any]:
     if unit is None:
         return {"declared": False, "name": None, "symbol": None, "si_per_unit": None}
     name = ifcopenshell.util.unit.get_full_unit_name(unit).lower().replace("_", " ")
+    scale = ifcopenshell.util.unit.get_unit_scale(unit) if hasattr(ifcopenshell.util.unit, "get_unit_scale") else None
+    return {"declared": True, "name": name, "symbol": _symbol(unit), "si_per_unit": scale}
+
+
+def _symbol(unit: ifcopenshell.entity_instance) -> str | None:
+    """The unit's symbol (``mm``, ``ft``), or None when none is known: never ``?``.
+
+    IfcOpenShell's ``get_unit_symbol`` looks a conversion-based unit up by its
+    name exactly as its table spells it, and answers ``?`` otherwise. Revit
+    writes ``FOOT``, ``SQUARE FOOT`` and ``CUBIC FOOT``, where the table has
+    ``foot``; IFC compares these names in any case (buildingSMART's PJS001 does),
+    so a conversion-based unit is looked up here in any case too. A name no table
+    knows gives no symbol, and the reply names the unit without one.
+    """
     try:
         symbol = ifcopenshell.util.unit.get_unit_symbol(unit)
     except Exception:  # an unusual conversion-based unit
         symbol = None
-    scale = ifcopenshell.util.unit.get_unit_scale(unit) if hasattr(ifcopenshell.util.unit, "get_unit_scale") else None
-    return {"declared": True, "name": name, "symbol": symbol, "si_per_unit": scale}
+    if (not symbol or "?" in symbol) and unit.is_a("IfcConversionBasedUnit"):
+        wanted = (unit.Name or "").strip().lower()
+        symbol = next((s for n, s in ifcopenshell.util.unit.unit_symbols.items() if n.lower() == wanted), None)
+    return symbol if symbol and "?" not in symbol else None
 
 
 def _plural(name: str | None) -> str | None:
@@ -85,8 +101,9 @@ def units(model: ifcopenshell.file) -> dict[str, Any]:
     out = {k: _unit_entry(model, t) for k, t in (("length", "LENGTHUNIT"), ("area", "AREAUNIT"), ("volume", "VOLUMEUNIT"))}
     length = out["length"]
     if length["declared"]:
+        symbol = f" ({length['symbol']})" if length["symbol"] else ""
         out["say"] = (
-            f"Lengths are in {_plural(length['name'])} ({length['symbol']}), areas in {_plural(out['area']['name']) or 'undeclared units'}"
+            f"Lengths are in {_plural(length['name'])}{symbol}, areas in {_plural(out['area']['name']) or 'undeclared units'}"
             f" and volumes in {_plural(out['volume']['name']) or 'undeclared units'}, as the model declares them."
         )
     else:
