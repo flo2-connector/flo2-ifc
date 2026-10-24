@@ -22,11 +22,16 @@ It holds the exact set flo2.io installs to run IfcOpenShell's ifcmcp:
 
 Its one piece of server code is a thin layer: `flo2_ifc.server.build_server` builds ifcmcp's own server, then
 replaces seven of its tools (`ifc_summary`, `ifc_tree`, `ifc_select`, `ifc_info`, `ifc_relations`, `ifc_validate`,
-`ifc_quantify`) with readers that page, filter, keep to one call's time and name the model's units, and adds two
-(`ifc_extent`, `ifc_units`). README.md, "The readers for a whole building", says why each one exists. Keep it thin:
+`ifc_quantify`) with readers that page, filter, keep to one call's time and name the model's units, and adds six
+(`ifc_extent`, `ifc_units`; since 0.3.0 the measures `ifc_footprint`, `ifc_volume`, `ifc_distance` and the drawing
+`ifc_draw`). README.md, "The readers for a whole building" and "Measures and drawings", says why each one exists. It
+also watches the session's editing methods (`_watch_changes`), so a measure says when the copy was edited and a kept
+mesh is never drawn after an edit. Keep it thin:
 
 - a replacement keeps its tool's name and only adds optional arguments;
-- a reader returns plain data and never writes the model;
+- a reader returns plain data and never writes the model; `ifc_draw` writes only its two files, where it is told;
+- a measure carries `cite` (the model file and its sha256, the GlobalIds, the unit and the method), and a volume is
+  never given for an open mesh;
 - every limit (characters, seconds, the geometry library and batch) is an environment setting with a measured default;
 - tests use synthetic models (`tests/models.py`), never a person's model.
 
@@ -86,13 +91,16 @@ uv pip install --python /tmp/flo2-ifc-venv/bin/python '.[test]'   # fetches the 
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp client. It checks:
   - the server's name and instructions;
-  - ifcmcp's 25 tools and flo2-ifc's two, with the readers' arguments;
+  - ifcmcp's 25 tools and flo2-ifc's six, with the readers' and measures' arguments;
   - that `ifc_new` and then `ifc_summary` both answer;
-  - that a synthetic millimetre house reads whole through the readers.
+  - that a synthetic millimetre house reads whole through the readers, and is measured and drawn (a PNG through
+    cairo, so the image's cairo library and fonts are checked too).
 
   Set `FLO2_IFC_SERVER` to a command line, such as a `docker run` of the image, to ask a different server the same
   questions.
 - `tests/test_reading.py` tests each reader on synthetic models, including a partial answer at a zero time limit.
+- `tests/test_measuring.py` and `tests/test_drawing.py` test the measures and the drawings on `models.measured_site()`,
+  whose sizes are known (`models.SITE`).
 - `tests/test_manifests.py` validates the Agent Plugins manifests against the schemas in `tests/schemas/`, and checks
   that both formats agree.
 - `tests/test_dependency_currency.py` tests the dependency check against fake registry data. It makes no network calls.
@@ -120,8 +128,10 @@ python3 tools/dependency_currency.py
 |---|---|
 | `pyproject.toml` | **the pinned set**, and the `flo2-ifc` console script |
 | `src/flo2_ifc/__init__.py` | `main()`: the `flo2-ifc` command |
-| `src/flo2_ifc/server.py` | ifcmcp's server with the readers in front of seven tools, and two added |
-| `src/flo2_ifc/reading.py` | the readers: paging, storeys, units, extent, timed validation |
+| `src/flo2_ifc/server.py` | ifcmcp's server with the readers in front of seven tools, and six added |
+| `src/flo2_ifc/reading.py` | the readers: paging, storeys, units, extent (and height above a datum), timed validation |
+| `src/flo2_ifc/geometry.py` | the meshes (kept per session), footprints, volumes and closedness, distances, and `cite` |
+| `src/flo2_ifc/drawing.py` | plans, sections and elevations to scale, as SVG and PNG |
 | `Dockerfile`, `.dockerignore` | the image flo2.io builds |
 | `plugin.json`, `mcp.json` | the plugin, Agent Plugins format |
 | `.claude-plugin/plugin.json`, `.mcp.json` | the plugin, Claude Code format |

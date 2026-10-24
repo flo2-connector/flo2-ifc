@@ -117,12 +117,15 @@ def test_bad_offsets_and_limits_are_refused_with_a_reason():
 def test_the_tree_of_a_big_storey_fits_one_reply_and_says_how_to_get_the_rest(big):
     t = R.tree(big)
     assert size(t) < R.PAGE_CHARS + 5000
-    ground = t["tree"]["children"][0]["children"][0]["children"][0]
+    # The storeys come in the file's order, which ifcopenshell.api's
+    # aggregate.assign_object leaves to a Python set: find each by its name.
+    storeys = {s["name"]: s for s in t["tree"]["children"][0]["children"][0]["children"]}
+    ground = storeys["GROUND"]
     assert ground["name"] == "GROUND" and ground["element_counts"] == {"IfcWall": 400}
     assert ground["elevation"] == 0.0 and ground["z"] == 0.0
     assert t["elements_page"]["total"] == 402 and t["elements_page"]["withheld"] > 0
     assert "offset" in t["more"] and "storey" in t["more"]
-    first = t["tree"]["children"][0]["children"][0]["children"][1]
+    first = storeys["FIRST"]
     assert first["z"] == 3000.0, "a storey's placed z, in the model's unit"
 
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flo2-ifc"
-version = "0.2.0"
+version = "0.3.0"
 description = "The exact ifcmcp set flo2.io runs: IfcOpenShell's MCP server for IFC building models, on the MCP Python SDK 2.x, pinned."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -44,6 +44,15 @@ dependencies = [
   # imports it itself, so it is pinned here, at the version ifcopenshell
   # 0.9.0 resolves to.
   "numpy==2.5.4",
+  # flo2-ifc's measures and drawings (src/flo2_ifc/geometry.py, drawing.py):
+  # a footprint is a union of plan projections, and a drawing's outlines are
+  # unions of projected triangles. ifcopenshell 0.9.0 already requires
+  # shapely, unpinned; flo2-ifc imports it itself, so it is pinned here, at
+  # the version ifcopenshell 0.9.0 resolves to.
+  "shapely==2.2.0",
+  # A drawing's picture: the SVG rendered to PNG. It needs the cairo library,
+  # which the Dockerfile installs in the image (libcairo2).
+  "cairosvg==2.9.1",
 ]
 
 [project.optional-dependencies]

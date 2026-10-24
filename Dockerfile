@@ -37,12 +37,21 @@ RUN python -m venv /opt/flo2-ifc \
 # may need the network or a writable root at run time: HOME is /tmp (a tmpfs
 # or nothing), and no bytecode is written.
 FROM python:3.12-slim
+# ifc_draw renders its SVG to PNG with cairosvg, which loads the cairo
+# library at run time (cairocffi), and writes its words in DejaVu Sans. Both
+# come from Debian, installed here and nowhere else; fontconfig's cache is
+# built at install, so nothing is written to the read-only root at run time.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libcairo2 fonts-dejavu-core \
+ && rm -rf /var/lib/apt/lists/*
 COPY --from=build /opt/flo2-ifc /opt/flo2-ifc
 ENV PATH=/opt/flo2-ifc/bin:$PATH HOME=/tmp PYTHONDONTWRITEBYTECODE=1
 # The entry point is flo2-ifc: ifcmcp's server with the readers in front of
-# seven of its tools and two added (since flo2-ifc 0.2.0). `ifcmcp` alone,
+# seven of its tools and two added (since flo2-ifc 0.2.0), and the measures
+# and the drawing (since 0.3.0). `ifcmcp` alone,
 # also on PATH, is the fork's server without them.
-RUN flo2-ifc --version && ifcmcp --version
+RUN flo2-ifc --version && ifcmcp --version \
+ && python -c "import cairosvg; assert cairosvg.svg2png(bytestring=b'<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\"><text y=\"3\">a</text></svg>')[:4] == b'\x89PNG'"
 USER 65534:65534
 WORKDIR /tmp
 ENTRYPOINT ["flo2-ifc"]
