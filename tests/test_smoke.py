@@ -44,6 +44,8 @@ EXPECTED_TOOLS = {
     "ifc_plot", "ifc_render",
     # flo2-ifc's own (src/flo2_ifc/server.py)
     "ifc_extent", "ifc_units", "ifc_footprint", "ifc_volume", "ifc_distance", "ifc_draw",
+    # since 0.5.0: IDS and buildingSMART's rules (src/flo2_ifc/checking.py, rules.py)
+    "ifc_check_ids", "ifc_write_ids", "ifc_check_rules",
 }
 
 #: The optional arguments flo2-ifc's readers add to ifcmcp's tools.
@@ -55,6 +57,21 @@ ADDED_ARGUMENTS = {
     "ifc_extent": {"selector", "element_id", "offset", "limit", "datum"},
     "ifc_footprint": {"selector", "ids", "element_id", "offset", "limit"},
     "ifc_volume": {"selector", "ids", "element_id", "offset", "limit"},
+    "ifc_check_ids": {"ids_path", "report_path", "start", "offset", "limit"},
+    "ifc_write_ids": {"description", "output_path"},
+    "ifc_check_rules": {"rule_sets", "start", "offset", "limit"},
+}
+
+#: An IDS the smoke test writes and checks the house against: its spaces store
+#: a NetFloorArea (they pass), its walls say no fire rating (they fail).
+SMOKE_IDS = {
+    "title": "Smoke test",
+    "specifications": [
+        {"name": "Every space has a net floor area", "applicability": [{"facet": "entity", "name": "IfcSpace"}],
+         "requirements": [{"facet": "property", "property_set": "Qto_SpaceBaseQuantities", "property": "NetFloorArea"}]},
+        {"name": "Every wall has a fire rating", "applicability": [{"facet": "entity", "name": "IfcWall"}],
+         "requirements": [{"facet": "property", "property_set": "Pset_WallCommon", "property": "FireRating"}]},
+    ],
 }
 
 
@@ -88,10 +105,15 @@ def write_house() -> str:
 async def round_trip() -> dict:
     override = shlex.split(os.environ.get("FLO2_IFC_SERVER", ""))
     command, args = (override[0], override[1:]) if override else (flo2_ifc_command(), [])
-    params = StdioServerParameters(command=command, args=args)
+    # The MCP client passes a child only a few variables; the rules' folder is
+    # passed on when it is set (CI's package job installs them there).
+    from mcp.client.stdio import get_default_environment
+
+    env = get_default_environment() | ({"FLO2_IFC_RULES_DIR": os.environ["FLO2_IFC_RULES_DIR"]} if os.environ.get("FLO2_IFC_RULES_DIR") and not override else {})
+    params = StdioServerParameters(command=command, args=args, env=env)
     house = write_house()
     out: dict = {}
-    with anyio.fail_after(120):
+    with anyio.fail_after(300):
         async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
             init = await session.initialize()
             out["name"] = init.server_info.name
@@ -117,6 +139,14 @@ async def round_trip() -> dict:
             out["volume"] = json.loads(text_of(await session.call_tool("ifc_volume", {"selector": "IfcWall"})))
             # Written where the confined image can write: its /tmp, as flo2's slot gives it an outbox.
             out["draw"] = json.loads(text_of(await session.call_tool("ifc_draw", {"output_path": f"{tempfile.gettempdir()}/flo2-ifc-smoke-plan", "storey": "GROUND"})))
+            # An IDS written, then the house checked against it, then buildingSMART's rules.
+            ids_at = f"{tempfile.gettempdir()}/flo2-ifc-smoke-req"
+            out["write_ids"] = json.loads(text_of(await session.call_tool("ifc_write_ids", {"description": json.dumps(SMOKE_IDS), "output_path": ids_at})))
+            out["check_ids"] = json.loads(text_of(await session.call_tool("ifc_check_ids", {"ids_path": f"{ids_at}.ids", "report_path": f"{tempfile.gettempdir()}/flo2-ifc-smoke-report"})))
+            bad = await session.call_tool("ifc_write_ids", {"description": json.dumps({"title": "t", "specifications": []}), "output_path": f"{ids_at}-bad"})
+            out["bad_ids"] = (bad.is_error, "".join(getattr(b, "text", "") for b in bad.content))
+            rules = await session.call_tool("ifc_check_rules", {"rule_sets": "critical,informal-proposition", "limit": 5})
+            out["rules"] = (rules.is_error, "".join(getattr(b, "text", "") for b in rules.content))
     return out
 
 
@@ -130,10 +160,10 @@ def test_initialize_names_the_server_and_gives_instructions(served):
     assert served["instructions"] and "ifc_load" in served["instructions"]
 
 
-def test_list_tools_gives_ifcmcps_25_tools_and_flo2_ifcs_six(served):
+def test_list_tools_gives_ifcmcps_25_tools_and_flo2_ifcs_nine(served):
     names = served["tools"]
-    assert len(names) == 31, names
-    assert len(set(names)) == 31, names
+    assert len(names) == 34, names
+    assert len(set(names)) == 34, names
     assert set(names) == EXPECTED_TOOLS
     for name in ("ifc_load", "ifc_summary", "ifc_edit", "ifc_plot", "ifc_render"):
         assert name in names
@@ -144,7 +174,8 @@ def test_the_readers_take_their_paging_and_filter_arguments(served):
         props = set(served["schemas"][tool].get("properties", {}))
         assert props == wanted, (tool, props)
         required = set(served["schemas"][tool].get("required", []))
-        assert required <= {"query", "element_id"} - ({"element_id"} if tool in ("ifc_extent", "ifc_footprint", "ifc_volume") else set()), (tool, required)
+        own = {"ifc_check_ids": {"ids_path"}, "ifc_write_ids": {"description", "output_path"}}.get(tool, set())
+        assert required <= ({"query", "element_id"} | own) - ({"element_id"} if tool in ("ifc_extent", "ifc_footprint", "ifc_volume") else set()), (tool, required)
 
 
 def test_a_millimetre_house_reads_whole_through_the_server(served):
@@ -191,6 +222,31 @@ def test_the_house_is_measured_and_drawn_through_the_server(served):
     drawn = served["draw"]
     assert drawn["view"] == "plan" and drawn["drawn"]["png_bytes"] > 1000, drawn
     assert drawn["sheet"]["scale"].startswith("1:") and drawn["elements"]["cut"] == 3, drawn
+
+
+def test_an_ids_is_written_and_the_house_checked_against_it_through_the_server(served):
+    written = served["write_ids"]
+    assert written["valid"] is True and written["written"].endswith("flo2-ifc-smoke-req.ids") and len(written["sha256"]) == 64
+    checked = served["check_ids"]
+    assert checked["complete"] is True and checked["passed"] is False
+    assert [s["status"] for s in checked["specifications"]] == ["passed", "failed"]
+    assert checked["specifications"][1]["failed_elements"] == 3 and len(checked["specifications"][1]["failing"][0]["global_id"]) == 22
+    assert checked["model"]["file"] == "house.ifc" and checked["ids"]["sha256"] == written["sha256"]
+    assert checked["reports"]["html"].endswith(".html") and checked["reports"]["json"].endswith(".json")
+    is_error, text = served["bad_ids"]
+    assert is_error and "at least one specification" in text, text
+
+
+def test_buildingsmarts_rules_run_through_the_server(served):
+    is_error, text = served["rules"]
+    if is_error and "not installed" in text and not os.environ.get("CI"):
+        pytest.skip("buildingSMART's rules are not installed here (tools/ifc_rules.py installs them)")
+    assert not is_error, text
+    said = json.loads(text)
+    assert said["checked"]["to"] > 0 and said["model"]["file"] == "house.ifc"
+    assert "critical" in said["rule_sets"]["ran"] and "IFC101" in said["rules_passed"]
+    if said["complete"]:
+        assert any(r["code"] == "GEM002" for r in said["rules_with_issues"]), said  # the house's rooms have no shape
 
 
 def test_version_is_one_line_naming_what_runs():

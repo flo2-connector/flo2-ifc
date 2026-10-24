@@ -22,9 +22,9 @@ It holds the exact set flo2.io installs to run IfcOpenShell's ifcmcp:
 
 Its one piece of server code is a thin layer: `flo2_ifc.server.build_server` serves every tool ifcmcp's own server
 defines on flo2-ifc's own `MCPServer` (MCP Python SDK 2.x), then replaces seven of them (`ifc_summary`, `ifc_tree`, `ifc_select`, `ifc_info`, `ifc_relations`, `ifc_validate`,
-`ifc_quantify`) with readers that page, filter, keep to one call's time and name the model's units, and adds six
+`ifc_quantify`) with readers that page, filter, keep to one call's time and name the model's units, and adds nine
 (`ifc_extent`, `ifc_units`; since 0.3.0 the measures `ifc_footprint`, `ifc_volume`, `ifc_distance` and the drawing
-`ifc_draw`). README.md, "The readers for a whole building" and "Measures and drawings", says why each one exists. It
+`ifc_draw`; since 0.5.0 the checks `ifc_check_ids`, `ifc_write_ids` and `ifc_check_rules`). README.md, "The readers for a whole building" and "Measures and drawings", says why each one exists. It
 also watches the session's editing methods (`_watch_changes`), so a measure says when the copy was edited and a kept
 mesh is never drawn after an edit. Keep it thin:
 
@@ -33,7 +33,9 @@ mesh is never drawn after an edit. Keep it thin:
 - a measure carries `cite` (the model file and its sha256, the GlobalIds, the unit and the method), and a volume is
   never given for an open mesh;
 - every limit (characters, seconds, the geometry library and batch) is an environment setting with a measured default;
-- tests use synthetic models (`tests/models.py`), never a person's model.
+- tests use synthetic models (`tests/models.py`), never a person's model;
+- a check runs IfcOpenShell's or buildingSMART's own code (ifctester, the gherkin rules), never a checker of our own,
+  and an IDS is built with ifctester's API, never written as XML by hand.
 
 **Where ifcmcp comes from (since 0.4.0).** ifcmcp's tool code comes from upstream's own release on PyPI,
 `ifcopenshell-mcp`, pinned exactly and **without** its `[mcp]` extra (which requires mcp<2). Its `core.py` never imports
@@ -88,12 +90,13 @@ Work in a virtual environment outside the repository:
 ```sh
 uv venv -p 3.12 /tmp/flo2-ifc-venv
 uv pip install --python /tmp/flo2-ifc-venv/bin/python '.[test]'   # every pin is a PyPI release
-/tmp/flo2-ifc-venv/bin/python -m pytest -v
+python3 tools/ifc_rules.py /tmp/flo2-ifc-rules                     # buildingSMART's rules, at their pin
+FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -v
 ```
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp client. It checks:
   - the server's name and instructions;
-  - ifcmcp's 25 tools and flo2-ifc's six, with the readers' and measures' arguments;
+  - ifcmcp's 25 tools and flo2-ifc's nine, with the readers', measures' and checks' arguments;
   - that `ifc_new` and then `ifc_summary` both answer;
   - that a synthetic millimetre house reads whole through the readers, and is measured and drawn (a PNG through
     cairo, so the image's cairo library and fonts are checked too).
@@ -132,10 +135,13 @@ python3 tools/dependency_currency.py
 |---|---|
 | `pyproject.toml` | **the pinned set**, and the `flo2-ifc` console script |
 | `src/flo2_ifc/__init__.py` | `main()`: the `flo2-ifc` command |
-| `src/flo2_ifc/server.py` | the server on MCP SDK 2.x: ifcmcp's tools, the readers in front of seven, and six added |
+| `src/flo2_ifc/server.py` | the server on MCP SDK 2.x: ifcmcp's tools, the readers in front of seven, and nine added |
 | `src/flo2_ifc/reading.py` | the readers: paging, storeys, units, extent (and height above a datum), timed validation |
 | `src/flo2_ifc/geometry.py` | the meshes (kept per session), footprints, volumes and closedness, distances, and `cite` |
 | `src/flo2_ifc/drawing.py` | plans, sections and elevations to scale, as SVG and PNG |
+| `src/flo2_ifc/checking.py` | the IDS check and the IDS writer, with ifctester |
+| `src/flo2_ifc/rules.py`, `rules_formatter.py` | buildingSMART's validation rules, run with behave in a child stopped at the call's time |
+| `tools/ifc_rules.py` | the rules' pin (release, commits, sha256s) and their install, which the image's build stage runs |
 | `Dockerfile`, `.dockerignore` | the image flo2.io builds |
 | `plugin.json`, `mcp.json` | the plugin, Agent Plugins format |
 | `.claude-plugin/plugin.json`, `.mcp.json` | the plugin, Claude Code format |

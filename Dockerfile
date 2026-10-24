@@ -26,9 +26,19 @@ FROM python:3.12-slim AS build
 WORKDIR /src
 COPY pyproject.toml README.md LICENSE ./
 COPY src/ ./src/
+COPY tools/ifc_rules.py ./tools/
+# buildingSMART's validation rules (since 0.5.0) are published as code, not on
+# PyPI: tools/ifc_rules.py fetches the pinned release here, where there is
+# network, and refuses an archive whose sha256 is not the pinned one. The
+# image then holds them at /opt/ifc-gherkin-rules and needs no network.
+# ifctester's web app (ifctester/webapp/www, 32 MB: a Pyodide build for a
+# browser) is removed: nothing here serves it, and a confined container has no
+# network to serve it on. ifctester's checker and reporters are untouched.
 RUN python -m venv /opt/flo2-ifc \
  && /opt/flo2-ifc/bin/pip install --no-cache-dir --disable-pip-version-check . \
- && /opt/flo2-ifc/bin/pip freeze --all
+ && /opt/flo2-ifc/bin/pip freeze --all \
+ && rm -rf /opt/flo2-ifc/lib/python3.12/site-packages/ifctester/webapp/www \
+ && python tools/ifc_rules.py /opt/ifc-gherkin-rules
 
 # The image does nothing to confine itself. flo2-tool-sandbox runs it with no
 # network, a read-only root, an unprivileged user (65534), a memory cap, and
@@ -44,13 +54,16 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends libcairo2 fonts-dejavu-core \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /opt/flo2-ifc /opt/flo2-ifc
-ENV PATH=/opt/flo2-ifc/bin:$PATH HOME=/tmp PYTHONDONTWRITEBYTECODE=1
+COPY --from=build /opt/ifc-gherkin-rules /opt/ifc-gherkin-rules
+ENV PATH=/opt/flo2-ifc/bin:$PATH HOME=/tmp PYTHONDONTWRITEBYTECODE=1 FLO2_IFC_RULES_DIR=/opt/ifc-gherkin-rules
 # The entry point is flo2-ifc: its own server on mcp 2.x with every one of
 # ifcmcp's tools, the readers in front of seven of them and two added (since
-# flo2-ifc 0.2.0), and the measures and the drawing (since 0.3.0). `ifcmcp`,
+# flo2-ifc 0.2.0), the measures and the drawing (since 0.3.0), and the IDS
+# check, the IDS writer and buildingSMART's rules (since 0.5.0). `ifcmcp`,
 # also on PATH, is upstream's own server, which needs mcp<2: here it answers
 # --version and does not serve.
 RUN flo2-ifc --version && ifcmcp --version \
+ && python -c "from ifctester import ids; ids.get_schema(); from flo2_ifc import rules; n = len(rules.rules_for(None)); assert n > 90, n; print('IDS 1.0 schema loaded;', n, 'of buildingSMART\'s rules', rules.release()['rules']['tag'])" \
  && python -c "import cairosvg; assert cairosvg.svg2png(bytestring=b'<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\"><text y=\"3\">a</text></svg>')[:4] == b'\x89PNG'"
 USER 65534:65534
 WORKDIR /tmp

@@ -1,7 +1,8 @@
-# The image is built from pyproject.toml, README.md (its readme), LICENSE and src/ only.
+# The image is built from pyproject.toml, README.md (its readme), LICENSE, src/ and tools/ifc_rules.py only.
 *
 !pyproject.toml
 !README.md
 !LICENSE
 !src/
+!tools/ifc_rules.py
 src/**/__pycache__

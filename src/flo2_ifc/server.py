@@ -23,7 +23,11 @@ geometry, and how high above a datum) and ``ifc_units`` (the units the model
 declares); since 0.3.0 the measures ``ifc_footprint``, ``ifc_volume`` and
 ``ifc_distance`` (geometry.py), and ``ifc_draw``, a plan, section or elevation
 to scale as SVG and PNG (drawing.py), which ifcmcp's ``ifc_plot`` cannot make
-in ifcopenshell 0.9.0.
+in ifcopenshell 0.9.0; and since 0.5.0 the checks ``ifc_check_ids`` (the model
+against an IDS, with IfcOpenShell's ifctester) and ``ifc_check_rules``
+(buildingSMART's normative validation rules, run offline), and
+``ifc_write_ids``, which builds an IDS with ifctester's API (checking.py,
+rules.py).
 
 Every tool, ifcmcp's and flo2-ifc's, is registered through one catch
 (``_reason_kept``): a failure reaches the agent as a ToolError with its own
@@ -48,11 +52,11 @@ import functools
 import inspect
 from typing import Any
 
-from flo2_ifc import drawing, geometry, reading
+from flo2_ifc import checking, drawing, geometry, reading, rules
 
 #: The tools this module replaces or adds, by name.
 REPLACED = ("ifc_summary", "ifc_tree", "ifc_select", "ifc_info", "ifc_relations", "ifc_validate", "ifc_quantify")
-ADDED = ("ifc_extent", "ifc_units", "ifc_footprint", "ifc_volume", "ifc_distance", "ifc_draw")
+ADDED = ("ifc_extent", "ifc_units", "ifc_footprint", "ifc_volume", "ifc_distance", "ifc_draw", "ifc_check_ids", "ifc_write_ids", "ifc_check_rules")
 
 #: The session's methods that change its model, and those that replace it.
 CHANGES = ("ifc_edit", "ifc_shape", "ifc_quantify")
@@ -458,6 +462,87 @@ def build_server() -> Any:
             png_px=png_px,
             edits=watched["edits"],
         )
+
+    @tool
+    def ifc_check_ids(ids_path: str, report_path: str = "", start: int = 0, offset: int = 0, limit: int = 20) -> dict[str, Any]:
+        """Check the model open in this session against an IDS file
+        (buildingSMART's Information Delivery Specification 1.0: what a model
+        must contain), with IfcOpenShell's own IDS checker, ifctester. Each
+        specification says ``passed`` or ``failed``, how many elements it
+        applies to (``applicable``), and the failing elements by GlobalId with
+        ifctester's reason, a page at a time. With ``report_path``, ifctester's
+        own reports are written as <report_path>.html (for a person) and
+        <report_path>.json (for a program). The reply names the IDS and the
+        model file, each with its sha256. An IDS that is not valid against the
+        IDS 1.0 schema is refused with the schema's reason. A large check is
+        made over several calls: ``complete: false`` and ``next_start``; call
+        again with ``start`` set to it. Reads the model only.
+
+        :param ids_path: The IDS file (.ids) to check against.
+        :param report_path: Optional: where to write the reports, without
+            .html or .json.
+        :param start: Which specification to start from, 0 first (the last
+            reply's ``next_start``).
+        :param offset: Where each specification's page of failing elements starts.
+        :param limit: How many failing elements each specification lists (default 20).
+        """
+        return checking.check_ids(model(), path(), ids_path, report_path=report_path, start=start, offset=offset, limit=limit, edits=watched["edits"])
+
+    @tool
+    def ifc_write_ids(description: str, output_path: str) -> dict[str, Any]:
+        """Write an IDS file (IDS 1.0) from a description of what a model must
+        contain, with ifctester's API: never hand-written XML. It is checked
+        against the IDS 1.0 schema and read back before it is kept; an invalid
+        one is refused with the reason, and nothing is written. Written as
+        <output_path>.ids. Needs no model.
+
+        ``description`` is JSON: {"title": ..., "ifc_version": ["IFC4"]
+        (optional), "specifications": [{"name": ..., "cardinality":
+        "required" | "optional" | "prohibited", "applicability": [facets],
+        "requirements": [facets]}]}. A facet is one of
+        {"facet": "entity", "name": "IfcWall", "predefined_type": ...};
+        {"facet": "attribute", "name": "Name", "value": ...};
+        {"facet": "property", "property_set": "Pset_WallCommon", "property":
+        "FireRating", "value": ..., "data_type": "IFCLABEL"};
+        {"facet": "classification", "system": ..., "value": ...};
+        {"facet": "material", "value": ...};
+        {"facet": "part_of", "entity": "IfcBuildingStorey", "relation":
+        "IFCRELCONTAINEDINSPATIALSTRUCTURE"}. A requirement facet may say
+        "cardinality" (required, optional, prohibited). A value is text or a
+        number, or a restriction: {"pattern": ...}, {"one_of": [...]},
+        {"at_least": n}, {"at_most": n}, {"more_than": n}, {"less_than": n},
+        {"min_length": n}, {"max_length": n}.
+
+        :param description: The IDS, described as above, as JSON text.
+        :param output_path: Where to write it, without .ids.
+        """
+        return checking.write_ids(description, output_path)
+
+    @tool
+    def ifc_check_rules(rule_sets: str = "", start: int = 0, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+        """Check the model FILE open in this session against buildingSMART's
+        validation rules beyond the IFC schema: the normative rules
+        (implementer agreements and informal propositions) and the
+        industry-practice rules that buildingSMART's validation service runs,
+        from their published code (github.com/buildingSMART/ifc-gherkin-rules,
+        MIT), run here unchanged, with no network. Each rule says
+        ``passed``, ``error``, ``warning`` or ``not_applicable``; issues name
+        the element by id and GlobalId with what was expected and observed, a
+        page at a time. The reply says which rule sets ran and which did not
+        (the schema and EXPRESS checks are ifc_validate's; the bSDD check
+        needs the network). Checks the file, not unsaved edits. A large model
+        is checked over several calls: ``complete: false`` and
+        ``next_start``; call again with ``start`` set to it.
+
+        :param rule_sets: Optional: comma separated, of critical,
+            implementer-agreement, informal-proposition, industry-practice; or
+            "normative" for the first three. Default: all.
+        :param start: Which rule to start from, 0 first, in code order (the
+            last reply's ``next_start``).
+        :param offset: Where the page of issues starts.
+        :param limit: How many issues to list (default 50).
+        """
+        return rules.check_rules(model(), path(), rule_sets=rule_sets, start=start, offset=offset, limit=limit, edits=watched["edits"])
 
     @tool
     def ifc_validate(express_rules: bool = False, start: int = 0) -> dict[str, Any]:
