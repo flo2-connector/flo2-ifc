@@ -511,7 +511,11 @@ def build_server() -> Any:
         "cardinality" (required, optional, prohibited). A value is text or a
         number, or a restriction: {"pattern": ...}, {"one_of": [...]},
         {"at_least": n}, {"at_most": n}, {"more_than": n}, {"less_than": n},
-        {"min_length": n}, {"max_length": n}.
+        {"min_length": n}, {"max_length": n}. UNITS, as IDS 1.0 has them: a
+        property's or quantity's value is in SI units (metres, square
+        metres), whatever the model's unit, and ifctester converts; an
+        attribute's value (a door's OverallWidth) is compared as stored, in
+        the model's own unit.
 
         :param description: The IDS, described as above, as JSON text.
         :param output_path: Where to write it, without .ids.

@@ -175,6 +175,21 @@ def test_a_prohibited_specification_and_a_required_one_with_nothing_to_apply_to(
     assert out["summary"] == {"passed": 2, "failed": 2, "not_this_ifc_version": 0}
 
 
+def test_a_quantity_is_compared_in_si_units_and_an_attribute_in_the_models_unit(tmp_path):
+    # The house is in millimetres. Its rooms store Height 2700 mm: IDS 1.0
+    # compares a quantity in SI units (2.7 m), so at_least 2.5 passes and
+    # at_least 2500 fails. A door's OverallWidth is an attribute, compared as
+    # stored: 900 (mm) passes at_least 850 and fails at_least 950.
+    m = _house()
+    m.by_type("IfcDoor")[0].OverallWidth = 900.0
+    height = lambda b: {"name": f"h {b}", "applicability": [{"facet": "entity", "name": "IfcSpace"}], "requirements": [{"facet": "property", "property_set": "Qto_SpaceBaseQuantities", "property": "Height", "value": {"at_least": b}, "data_type": "IfcLengthMeasure"}]}
+    width = lambda b: {"name": f"w {b}", "applicability": [{"facet": "entity", "name": "IfcDoor"}], "requirements": [{"facet": "attribute", "name": "OverallWidth", "value": {"at_least": b}}]}
+    model, path = _kept(m, tmp_path)
+    ids = _ids(tmp_path, [height(2.5), height(2500), width(850), width(950)])
+    got = [s["status"] for s in C.check_ids(model, path, ids)["specifications"]]
+    assert got == ["passed", "failed", "passed", "failed"]
+
+
 # ---------------------------------------------------------------- the reply and the reports
 
 
