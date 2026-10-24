@@ -23,6 +23,8 @@ The tools a chat sees are unchanged. Where their code comes from changes, so thi
   `ifcopenshell-mcp`'s row says whether upstream's own server has caught up with mcp 2.x.
 - The image's build stage no longer installs git. `ifcmcp`, still on PATH, is upstream's own server: beside mcp 2.3.0
   it answers `--version` (`ifcmcp 0.9.0`, where the fork said `0.0.0`) and does not serve.
+- `flo2-ifc --version` is one line naming what runs: `flo2-ifc 0.4.0 (ifcopenshell-mcp 0.9.0, mcp 2.3.0)`, read from
+  the installed packages. flo2's broker reads its first line.
 
 ## 0.3.1 (2026-10-24)
 

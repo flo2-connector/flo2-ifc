@@ -191,3 +191,16 @@ def test_the_house_is_measured_and_drawn_through_the_server(served):
     drawn = served["draw"]
     assert drawn["view"] == "plan" and drawn["drawn"]["png_bytes"] > 1000, drawn
     assert drawn["sheet"]["scale"].startswith("1:") and drawn["elements"]["cut"] == 3, drawn
+
+
+def test_version_is_one_line_naming_what_runs():
+    # flo2's broker reads the first line of the image's --version.
+    import subprocess
+
+    out = subprocess.run([flo2_ifc_command(), "--version"], capture_output=True, text=True, check=True,
+                         env={**os.environ, "COLUMNS": "20"}).stdout
+    assert out.count("\n") == 1, out
+    from flo2_ifc import __version__
+
+    assert out.startswith(f"flo2-ifc {__version__} (ifcopenshell-mcp "), out
+    assert ", mcp 2." in out, out

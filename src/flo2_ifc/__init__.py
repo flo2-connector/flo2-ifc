@@ -19,12 +19,26 @@ import sys
 __version__ = "0.4.0"
 
 
+def _installed(name: str) -> str:
+    """`name` and the version installed beside flo2-ifc, as --version says it:
+    what actually runs, kept short so the line is one line."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return f"{name} {version(name)}"
+    except PackageNotFoundError:
+        return f"{name} not installed"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="flo2-ifc",
         description="ifcmcp, IfcOpenShell's MCP server for IFC building models, as flo2.io runs it.",
+        # Text as written: --version stays one line however narrow the terminal,
+        # because flo2's broker reads its first line.
+        formatter_class=argparse.RawTextHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version=f"flo2-ifc {__version__} (ifcmcp from ifcopenshell-mcp, pinned in pyproject.toml, on mcp 2.x)")
+    parser.add_argument("--version", action="version", version=f"flo2-ifc {__version__} ({_installed('ifcopenshell-mcp')}, {_installed('mcp')})")
     parser.add_argument("--transport", choices=["stdio", "sse", "streamable-http"], default="stdio", help="MCP transport (default: stdio)")
     args = parser.parse_args()
     if importlib.util.find_spec("mcp.server.mcpserver") is None:
