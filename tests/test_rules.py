@@ -86,12 +86,18 @@ def test_rule_sets_narrow_what_runs(files):
 
 
 def test_a_check_out_of_time_says_where_to_go_on_from(files):
+    # The time a whole run takes on this machine, then a budget well short of
+    # it: the check stops part way and says where to go on from (or, if not
+    # even the first rule fits, passes it over and names it).
+    whole = R.check_rules(None, files["rooms"], seconds=300)
+    assert whole["complete"] is True
+    budget = max(0.5, whole["seconds"] * 0.5)
     t = time.monotonic()
-    first = R.check_rules(None, files["rooms"], seconds=6)
-    assert time.monotonic() - t < 9
+    first = R.check_rules(None, files["rooms"], seconds=budget)
+    assert time.monotonic() - t < budget + 3
     assert first["complete"] is False and first["next_start"] == first["checked"]["to"] > 0
     assert "Call again with start" in first["note"]
-    rest = R.check_rules(None, files["rooms"], start=first["next_start"], seconds=120)
+    rest = R.check_rules(None, files["rooms"], start=first["next_start"], seconds=300)
     assert rest["complete"] is True and rest["checked"]["from"] == first["next_start"]
 
 
