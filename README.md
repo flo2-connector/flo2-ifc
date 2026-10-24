@@ -85,6 +85,14 @@ of the other's drawn area lies inside it and the other is the smaller (`HOLDS_SH
 hair past its room's edge still counts, and rooms that merely overlap do not. The names of rooms that hold none stay
 where they always were. A section names the rooms it cuts the same way.
 
+**A room's area on a plan is the one the model stores** (since 0.5.0), when it stores one: the authoring tool's own
+number, `Qto_SpaceBaseQuantities.NetFloorArea` first, then an `Area` in another set (a Revit export keeps it in
+"Dimensions", which is looked at first). It is read in the model's area unit. Only a room that stores no area is
+labelled with the area measured from its outline. The reply's `room_areas` says, per room, which was used (`source`:
+`stored` or `measured`), and where a stored area and the measured outline differ by more than 5% of the stored one
+(`AREA_DIFFERS`) it names the room and both numbers in `notes`: an authoring tool measures a room to its own rules
+(to a wall's finish face or its centre, with or without a column), and the difference is a fact about the model.
+
 **The meshes are kept** for the session (`FLO2_IFC_MESH_CACHE_MB`, 256 MB; a large building model's all fit
 in it), so a second drawing or measure of the same elements does not make them again, and they are forgotten whenever
 the session's model changes (an edit, a shape, a reload: `server._watch_changes`). A drawing that runs out of

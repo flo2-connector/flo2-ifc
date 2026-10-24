@@ -2,6 +2,16 @@
 
 flo2-ifc's versions, newest first. Versions before 0.3.1 are described in README.md, in the sections marked "since".
 
+## 0.5.0 (unreleased)
+
+- **A drawn room's label shows the area the model stores for it.** `ifc_draw` labelled every room on a plan with the
+  area measured from its outline, which can differ from the area the authoring tool stores for the same room. Now a
+  room is labelled with its stored area, `Qto_SpaceBaseQuantities.NetFloorArea` first, then an `Area` in another set
+  (Revit's "Dimensions" first), read in the model's area unit; only a room that stores none is labelled as measured.
+  The reply's `room_areas` says, per room, which was used, and `notes` names each room whose stored and measured
+  areas differ by more than 5%, with both numbers. A model that stores no room areas draws exactly as before.
+  (23d874b1643673ad's `req:a-drawn-rooms-label-shows-the-models-stored-room-area`.)
+
 ## 0.4.0 (2026-10-24)
 
 The tools a chat sees are unchanged. Where their code comes from changes, so this is a minor release.
