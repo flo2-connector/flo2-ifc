@@ -405,8 +405,10 @@ To a newer `ifcopenshell-mcp` release:
 
 ## The design
 
-This repository is designed on flo2.io, in the design **"IfcOpenShell fork"** (id `23d874b1643673ad`). Read it through
-the `ifcopenshell-fork` MCP connection. Where this README and the design differ, the design wins.
+This repository is designed on flo2.io, in the design **"flo2-ifc"** (id `1510fc3728665dbf`), served at
+`https://api.flo2.io/g/1510fc3728665dbf/mcp`. Where this README and the design differ, the design wins. IfcOpenShell,
+which this repository installs, has its own design, **"IfcOpenShell fork"** (id `23d874b1643673ad`); flo2-ifc's
+records lived there until 2026-10-24.
 
 ## Licence
 
