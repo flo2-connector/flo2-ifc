@@ -18,3 +18,15 @@
 # name = "ifcopenshell"
 # reason = "0.10.0 changes ifc5d's base-quantities rule; flo2 re-measures its sample models before moving."
 # look_again = 2026-11-01
+
+[[hold]]
+kind = "package"
+name = "django"
+reason = "buildingSMART's validation rules (tools/ifc_rules.py, v1.0.5) import its model classes and are tested on 5.2; it moves with the rules' own requirements.txt."
+look_again = 2026-12-01
+
+[[hold]]
+kind = "package"
+name = "pyspellchecker"
+reason = "buildingSMART's validation rules (tools/ifc_rules.py, v1.0.5) pin 0.8.3 in their requirements.txt; it moves with the rules' release."
+look_again = 2026-12-01

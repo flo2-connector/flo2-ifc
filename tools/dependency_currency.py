@@ -20,7 +20,10 @@ reads four things:
     up with mcp 2.x. That is reported, never failed;
   - every `uses:` in .github/workflows, against the action's newest release;
   - the Agent Plugins schema version that plugin.json and mcp.json declare,
-    against the newest tag of the specification's repository.
+    against the newest tag of the specification's repository;
+  - buildingSMART's validation rules (since 0.5.0), which are not on PyPI:
+    the release tools/ifc_rules.py pins, against the rules repository's newest
+    release (kind "rules").
 
 WHAT FAILS, AND WHAT ONLY REPORTS.
   - A patch or minor release newer than the pin is REPORTED (patch_owed,
@@ -212,6 +215,23 @@ def declared_schema_versions(repo: Path) -> dict[str, list[str]]:
     return out
 
 
+RULES_PIN = Path("tools") / "ifc_rules.py"
+
+
+def declared_rules(repo: Path) -> dict | None:
+    """The rules release tools/ifc_rules.py pins (its RELEASE["rules"]), read
+    without running the file; None when the repository pins none."""
+    import ast
+
+    path = repo / RULES_PIN
+    if not path.exists():
+        return None
+    for node in ast.parse(path.read_text()).body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "RELEASE" for t in node.targets):
+            return ast.literal_eval(node.value)["rules"]
+    return {}
+
+
 def load_holds(repo: Path) -> list[dict]:
     path = repo / HOLDS
     if not path.exists():
@@ -370,6 +390,26 @@ def check(repo: Path, upstream: Upstream, today: dt.date) -> dict:
         state, note = judge_hold(find_hold(holds, "action", slug), today)
         rows.append({**row, "state": state, "note": f"v{latest[0]} is out: {note}"})
 
+    pinned_rules = declared_rules(repo)
+    if pinned_rules is not None:
+        slug = pinned_rules.get("repository", "?")
+        row = {"kind": "rules", "name": slug, "pinned": pinned_rules.get("tag", "?"), "declared_in": [str(RULES_PIN)]}
+        pinned = parse_version(str(pinned_rules.get("tag", "")))
+        if pinned is None:
+            rows.append({**row, "state": "unknown", "note": "tools/ifc_rules.py pins no release tag this check reads"})
+        else:
+            try:
+                latest = upstream.github_latest(slug)
+            except Exception as e:  # noqa: BLE001
+                latest, err = None, f"GitHub lookup failed: {e}"
+            else:
+                err = "no release or version tag found"
+            if latest is None:
+                rows.append({**row, "state": "unknown", "note": err})
+            else:
+                rows.append(_behind(row, pinned, latest, holds, today, "rules", slug,
+                                    "move RELEASE in tools/ifc_rules.py (tag, commits, sha256s), then the rules' own pins in pyproject.toml"))
+
     declared = declared_schema_versions(repo)
     spec_latest: Version | None = None
     spec_error = None
@@ -414,7 +454,7 @@ def check(repo: Path, upstream: Upstream, today: dt.date) -> dict:
 def markdown(report: dict) -> str:
     rank = {s: i for i, s in enumerate(ORDER)}
     lines = [f"## flo2-ifc dependency currency, {report['date']}", "",
-             "Every pin in pyproject.toml, every GitHub Action, and the Agent Plugins schema, against "
+             "Every pin in pyproject.toml, every GitHub Action, the Agent Plugins schema and buildingSMART's rules, against "
              "their latest releases. " + ", ".join(f"{n} {s}" for s, n in report["counts"].items()) + ".", "",
              "| state | kind | name | pinned | latest | note |",
              "|---|---|---|---|---|---|"]

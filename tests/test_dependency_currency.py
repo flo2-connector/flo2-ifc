@@ -21,6 +21,7 @@ sys.path.insert(0, str(REPO / "tools"))
 import dependency_currency as dc  # noqa: E402
 
 TODAY = dt.date(2026, 10, 3)
+RULES_REPO = "buildingSMART/ifc-gherkin-rules"
 SHA = "a2bada6699aaf2e0926ed07b9a97e51a70e1ddfb"
 IFCMCP = "ifcopenshell-mcp==0.9.0"
 A_GIT_PIN = f"ifcopenshell-mcp[mcp] @ git+https://github.com/example/IfcOpenShell@{SHA}#subdirectory=src/ifcmcp"
@@ -63,7 +64,7 @@ class Fake:
         self.pypi_data = {"mcp": "2.3.0", "networkx": "3.7", "ifcopenshell": "0.9.0", "setuptools": "84.0.0",
                           "pytest": "9.1.1", "ifcopenshell-mcp": ("0.9.0", OLD_MCP), **(pypi or {})}
         self.github_data = {"actions/checkout": (7, 0, 1), "actions/setup-python": (7, 0, 0),
-                            dc.SPEC_REPO: (1, 0, 0), **(github or {})}
+                            dc.SPEC_REPO: (1, 0, 0), RULES_REPO: (1, 0, 5), **(github or {})}
 
     def upstream(self) -> dc.Upstream:
         return dc.Upstream(pypi=self.pypi, github_latest=self.github_latest)
@@ -311,8 +312,39 @@ def test_this_repository_passes_against_upstream_at_its_own_pins():
     pypi["ifcopenshell-mcp"] = ("0.9.0", OLD_MCP)
     github = {slug: (int(sorted(use["refs"])[0].lstrip("v")), 0, 0)
               for slug, use in dc.declared_actions(REPO).items()}
+    rules = dc.declared_rules(REPO)
+    github[rules["repository"]] = dc.parse_version(rules["tag"])
     fake = Fake(pypi=pypi, github=github)
     report = dc.check(REPO, fake.upstream(), TODAY)
     assert report["failing"] == 0, dc.markdown(report)
     holds = tomllib.loads((REPO / dc.HOLDS).read_text())
-    assert holds.get("hold", []) == [], "dependency-holds.toml starts empty"
+    for hold in holds.get("hold", []):
+        assert hold.get("reason") and hold.get("look_again"), hold
+
+
+def _rules_pin(tmp: Path, tag: str) -> None:
+    (tmp / "tools").mkdir(exist_ok=True)
+    (tmp / "tools" / "ifc_rules.py").write_text(
+        f'RELEASE = {{"rules": {{"repository": "{RULES_REPO}", "tag": "{tag}", "commit": "x", "sha256": "y"}}}}\n'
+    )
+
+
+def test_the_rules_release_is_checked_against_upstreams_latest(tmp_path):
+    make_repo(tmp_path, BASE)
+    _rules_pin(tmp_path, "v1.0.5")
+    report = dc.check(tmp_path, Fake(github={RULES_REPO: (1, 1, 0)}).upstream(), TODAY)
+    row = rows(report)[("rules", RULES_REPO)]
+    assert row["state"] == "minor_owed" and row["latest"] == "1.1.0" and "tools/ifc_rules.py" in row["note"]
+    assert report["failing"] == 0
+
+
+def test_a_new_rules_major_with_no_hold_fails(tmp_path):
+    make_repo(tmp_path, BASE)
+    _rules_pin(tmp_path, "v1.0.5")
+    report = dc.check(tmp_path, Fake(github={RULES_REPO: (2, 0, 0)}).upstream(), TODAY)
+    assert rows(report)[("rules", RULES_REPO)]["state"] == "series_owed" and report["failing"] == 1
+
+
+def test_a_repository_without_the_rules_has_no_rules_row(tmp_path):
+    report = run(tmp_path, BASE)
+    assert not [r for r in report["rows"] if r["kind"] == "rules"]

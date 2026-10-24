@@ -257,3 +257,72 @@ def test_a_freed_models_meshes_are_forgotten_with_it(tmp_path):
     gc.collect()
     assert not any(k[0] == key for k in G._cache)
     assert not any(k[0] == key for k in G._closures)
+
+
+def _store_area(m, room: str, pset: str, name: str, value: float) -> None:
+    import ifcopenshell.api
+
+    space = next(s for s in m.by_type("IfcSpace") if s.Name == room)
+    if pset.startswith("Qto_"):
+        q = ifcopenshell.api.run("pset.add_qto", m, product=space, name=pset)
+        ifcopenshell.api.run("pset.edit_qto", m, qto=q, properties={name: value})
+    else:
+        p = ifcopenshell.api.run("pset.add_pset", m, product=space, name=pset)
+        ifcopenshell.api.run("pset.edit_pset", m, pset=p, properties={name: value})
+
+
+def test_a_room_is_labelled_with_the_area_the_model_stores_and_a_large_difference_is_named(tmp_path):
+    # Room A is 4 x 6 m (24.0 m²) as drawn; the model stores 30.0 m² (the outline is 20% under it).
+    # Room B is 3 x 6 m (18.0 m²) and stores 20.5 m², 12% apart, in a Revit-style
+    # "Dimensions" set. Room C, 5 x 6 m, stores none and is labelled as measured (30.0 m²).
+    m = models.rooms_on_a_floor([("Room A", (0, 0, 4, 6)), ("Room B", (4, 0, 7, 6)), ("Room C", (7, 0, 12, 6))])
+    _store_area(m, "Room A", "Qto_SpaceBaseQuantities", "NetFloorArea", 30.0)
+    _store_area(m, "Room B", "Dimensions", "Area", 20.5)
+    out = D.draw(m, str(tmp_path / "plan"), view="plan", storey="Level 1")
+    words = texts(svg_of(out))
+    assert "30.0 m² (323 ft²)" in words and "24.0 m²" not in words
+    assert "20.5 m² (221 ft²)" in words and "18.0 m²" not in words
+    by = {r["name"]: r for r in out["room_areas"]}
+    assert by["Room A"]["source"] == "stored" and by["Room A"]["stored_in"] == "Qto_SpaceBaseQuantities.NetFloorArea"
+    assert by["Room A"]["area"]["square_metres"] == pytest.approx(30.0) and by["Room A"]["measured"]["square_metres"] == pytest.approx(24.0, abs=0.01)
+    assert by["Room A"]["differs"] is True
+    assert by["Room B"]["source"] == "stored" and by["Room B"]["stored_in"] == "Dimensions.Area" and by["Room B"]["differs"] is True
+    assert by["Room C"]["source"] == "measured" and by["Room C"]["area"]["square_metres"] == pytest.approx(30.0, abs=0.01)
+    assert "measured" not in by["Room C"] and "differs" not in by["Room C"]
+    named = [n for n in out["notes"] if "the model stores" in n]
+    assert len(named) == 2
+    assert named[0].startswith("Room A (#") and "30.0 m²" in named[0] and "24.0 m²" in named[0] and "20% apart" in named[0]  # of the stored area
+
+
+def test_a_stored_area_within_five_percent_is_labelled_and_not_named(tmp_path):
+    m = models.rooms_on_a_floor([("Room A", (0, 0, 4, 6))])
+    _store_area(m, "Room A", "Qto_SpaceBaseQuantities", "NetFloorArea", 24.6)  # 2.5% over the outline's 24.0
+    out = D.draw(m, str(tmp_path / "plan"), view="plan", storey="Level 1")
+    assert "24.6 m²" in texts(svg_of(out))
+    (room,) = out["room_areas"]
+    assert room["source"] == "stored" and "differs" not in room
+    assert "notes" not in out
+
+
+def test_net_floor_area_comes_before_a_dimensions_area(tmp_path):
+    m = models.rooms_on_a_floor([("Room A", (0, 0, 4, 6))])
+    _store_area(m, "Room A", "Dimensions", "Area", 26.0)
+    _store_area(m, "Room A", "Qto_SpaceBaseQuantities", "NetFloorArea", 24.2)
+    out = D.draw(m, str(tmp_path / "plan"), view="plan", storey="Level 1")
+    assert out["room_areas"][0]["stored_in"] == "Qto_SpaceBaseQuantities.NetFloorArea"
+    assert "24.2 m²" in texts(svg_of(out))
+
+
+def test_a_stored_area_is_read_in_the_models_area_unit(tmp_path):
+    # The model's areas in square millimetres: 24,000,000 mm² is 24.0 m².
+    import ifcopenshell.api
+
+    m = models.rooms_on_a_floor([("Room A", (0, 0, 4, 6))])
+    mm2 = ifcopenshell.api.run("unit.add_si_unit", m, unit_type="AREAUNIT", prefix="MILLI")
+    assignment = m.by_type("IfcUnitAssignment")[0]
+    assignment.Units = [u for u in assignment.Units if getattr(u, "UnitType", None) != "AREAUNIT"] + [mm2]
+    _store_area(m, "Room A", "Qto_SpaceBaseQuantities", "NetFloorArea", 30_000_000.0)
+    out = D.draw(m, str(tmp_path / "plan"), view="plan", storey="Level 1")
+    room = out["room_areas"][0]
+    assert room["area"]["square_metres"] == pytest.approx(30.0) and room["area"]["model"] == pytest.approx(30_000_000.0)
+    assert "30.0 m²" in texts(svg_of(out))

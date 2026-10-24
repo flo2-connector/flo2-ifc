@@ -2,6 +2,38 @@
 
 flo2-ifc's versions, newest first. Versions before 0.3.1 are described in README.md, in the sections marked "since".
 
+## 0.5.0 (unreleased)
+
+Three tools are added, so this is a minor release. Every tool 0.4.0 served is unchanged.
+
+- **`ifc_check_ids`: a model checked against an IDS**, with IfcOpenShell's own IDS checker (ifctester 0.9.0). Each
+  specification passed or failed, how many elements it applies to, and the failing elements by GlobalId with
+  ifctester's reason, paged; ifctester's own HTML and JSON reports written where the caller says; the IDS and the
+  model file cited by name and sha256. An IDS invalid against the IDS 1.0 schema is refused with the schema's reason.
+  It runs in a forked child stopped at the call's time, and a check that does not finish says where to go on from.
+- **`ifc_write_ids`: an IDS written from a structured description** with ifctester's API (entity, attribute,
+  property, classification, material and part_of facets; plain values or restrictions; required, optional or
+  prohibited), checked against the IDS 1.0 XSD and read back before it is written, refused with the reason otherwise.
+- **`ifc_check_rules`: buildingSMART's validation rules**, the normative rules its validation service runs
+  (github.com/buildingSMART/ifc-gherkin-rules v1.0.5, MIT), run unchanged and offline with behave on the model file,
+  stopped at the call's time and gone on from `start`. The reply says which rule sets ran and which did not (the
+  schema and EXPRESS checks are `ifc_validate`'s; the bSDD check needs the network), and flags the 21 rules whose own
+  upstream tests do not all pass in this build. `tools/ifc_rules.py` pins the release by tag, commit and sha256; the
+  image's build stage installs it at `/opt/ifc-gherkin-rules`.
+- **New pins**: ifctester, xmlschema and elementpath; behave, django (5.2.18), python-dotenv, rtree, pyproj, mpmath,
+  pydot, pyspellchecker, pyparsing and pydantic for the rules. Holds for django and pyspellchecker, which move with the
+  rules' release. The dependency check also checks the rules' release against upstream's latest (kind `rules`).
+- **The image** is 660 MB (0.4.0: 560 MB): ifctester without its 32 MB browser web app, the rules (3.2 MB) and their
+  dependencies.
+
+- **A drawn room's label shows the area the model stores for it.** `ifc_draw` labelled every room on a plan with the
+  area measured from its outline, which can differ from the area the authoring tool stores for the same room. Now a
+  room is labelled with its stored area, `Qto_SpaceBaseQuantities.NetFloorArea` first, then an `Area` in another set
+  (Revit's "Dimensions" first), read in the model's area unit; only a room that stores none is labelled as measured.
+  The reply's `room_areas` says, per room, which was used, and `notes` names each room whose stored and measured
+  areas differ by more than 5%, with both numbers. A model that stores no room areas draws exactly as before.
+  (23d874b1643673ad's `req:a-drawn-rooms-label-shows-the-models-stored-room-area`.)
+
 ## 0.4.0 (2026-10-24)
 
 The tools a chat sees are unchanged. Where their code comes from changes, so this is a minor release.

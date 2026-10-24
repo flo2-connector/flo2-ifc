@@ -407,6 +407,32 @@ _EM_BOLD, _EM = 0.7, 0.62
 _LABEL_PAD = 0.6
 
 
+#: A stored room area and the area measured from its outline that differ by more
+#: than this share of the stored one are named in the reply, with both numbers.
+AREA_DIFFERS = 0.05
+
+
+def stored_room_area(sp: ifcopenshell.entity_instance) -> tuple[float, str] | None:
+    """The area the model STORES for a room, in the model's area unit, and where
+    it is stored: Qto_SpaceBaseQuantities.NetFloorArea first (IFC's own base
+    quantity), then an "Area" in any other property or quantity set (a Revit
+    export keeps it in its "Dimensions" set, which is looked at first). None
+    when the model stores no area for it."""
+    psets = ifcopenshell.util.element.get_psets(sp)
+
+    def number(v: Any) -> float | None:
+        return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else None
+
+    v = number(psets.get("Qto_SpaceBaseQuantities", {}).get("NetFloorArea"))
+    if v is not None:
+        return v, "Qto_SpaceBaseQuantities.NetFloorArea"
+    for name in sorted(psets, key=lambda n: (n != "Dimensions", n)):
+        v = number(psets[name].get("Area"))
+        if v is not None:
+            return v, f"{name}.Area"
+    return None
+
+
 def _room_name(sp: ifcopenshell.entity_instance) -> str:
     return " ".join(t for t in (sp.Name, getattr(sp, "LongName", None)) if t)
 
@@ -784,9 +810,28 @@ def draw(
             svg.append(f'<path class="{hl}cutline" {_attrs(e)} d="{"".join(_path(g, k, ox, oy) for g in open_)}"/>')
     svg.append('</g><g id="labels">')
     unlabelled: list[dict[str, Any]] = []
+    room_areas: list[dict[str, Any]] = []
     for (sp, poly, area), held in zip(room_shapes, rooms_inside(room_shapes)):
         name = _room_name(sp)
-        a = u.area_of(area)
+        # The label shows the area the model stores for the room, when it
+        # stores one (the authoring tool's own number), and the area measured
+        # from the room's outline only when it stores none.
+        measured = u.area_of(area)
+        stored = stored_room_area(sp) if view == "plan" else None
+        a = u.area_of(stored[0] * u.area_si) if stored else measured
+        if view == "plan":
+            entry: dict[str, Any] = {"id": sp.id(), "name": name, "global_id": getattr(sp, "GlobalId", None), "source": "stored" if stored else "measured", "area": a}
+            if stored:
+                entry["stored_in"] = stored[1]
+                entry["measured"] = measured
+                if abs(measured["square_metres"] - a["square_metres"]) > AREA_DIFFERS * a["square_metres"]:
+                    entry["differs"] = True
+                    notes.append(
+                        f"{name or 'A room'} (#{sp.id()}): the model stores {a['model']:,} {u.area} ({a['square_metres']:,.1f} m², {a['square_feet']:,.0f} ft²) in {stored[1]}, "
+                        f"and its outline measures {measured['model']:,} {u.area} ({measured['square_metres']:,.1f} m², {measured['square_feet']:,.0f} ft²), "
+                        f"{abs(measured['square_metres'] - a['square_metres']) / a['square_metres']:.0%} apart. The label shows the stored area."
+                    )
+            room_areas.append(entry)
         area_text = f"{a['square_metres']:,.1f} m² ({a['square_feet']:,.0f} ft²)" if view == "plan" else ""
         if held:
             # A room that holds others is named in its part clear of them, or not on the sheet at all.
@@ -794,6 +839,8 @@ def draw(
             if pt is None:
                 inner = [_room_name(room_shapes[j][0]) or f"#{room_shapes[j][0].id()}" for j in held]
                 unlabelled.append({"id": sp.id(), "name": name, "global_id": getattr(sp, "GlobalId", None), "contains": inner})
+                if room_areas and room_areas[-1]["id"] == sp.id():
+                    room_areas[-1]["labelled"] = False
                 continue
         else:
             pt = poly.centroid if poly.contains(poly.centroid) else poly.representative_point()
@@ -865,6 +912,8 @@ def draw(
             out["highlight_withheld"] = len(highlighted) - 50
     if view != "plan":
         out["looking"] = {"toward": [round(float(x), 4) for x in v.toward[:2]], "right": [round(float(x), 4) for x in v.right[:2]]}
+    if room_areas:
+        out["room_areas"] = room_areas
     if unlabelled:
         out["unlabelled_rooms"] = unlabelled
         for r in unlabelled:

@@ -16,6 +16,10 @@ and compares:
 
 A difference here means the tools changed. If that is meant, for example on a
 new ifcopenshell-mcp, flo2's real-ifcmcp door test must be changed with it.
+
+Since 0.5.0 three tools are ADDED after 0.3.1's (``NEW_SINCE``): the IDS check,
+the IDS writer and buildingSMART's rules. Every tool 0.3.1 listed is still
+listed the same, in the same order, and nothing else is new.
 """
 
 from __future__ import annotations
@@ -34,6 +38,8 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from tests.test_smoke import flo2_ifc_command
 
 BEFORE = json.loads((Path(__file__).parent / "tools-0.3.1.json").read_text())
+#: The tools added since 0.3.1, in the order they are listed after its tools.
+NEW_SINCE = ["ifc_check_ids", "ifc_write_ids", "ifc_check_rules"]
 
 #: Calls that fail, each keyed as tools-0.3.1.json keys its error. The first
 #: group runs with no model open, the second after ifc_new.
@@ -94,25 +100,35 @@ def test_the_server_keeps_its_name_and_instructions(now):
     assert now["server"] == BEFORE["server"]
 
 
+def _old(now) -> list[dict]:
+    return [t for t in now["tools"] if t["name"] not in NEW_SINCE]
+
+
 def test_the_same_tools_in_the_same_order(now):
-    assert [t["name"] for t in now["tools"]] == [t["name"] for t in BEFORE["tools"]]
+    assert [t["name"] for t in _old(now)] == [t["name"] for t in BEFORE["tools"]]
+
+
+def test_only_the_new_tools_are_added(now):
+    names = [t["name"] for t in now["tools"]]
+    added = [n for n in names if n not in {t["name"] for t in BEFORE["tools"]}]
+    assert sorted(added) == sorted(NEW_SINCE), added
 
 
 def test_every_tool_takes_the_same_arguments(now):
     before = {t["name"]: t["inputSchema"] for t in BEFORE["tools"]}
-    for tool in now["tools"]:
+    for tool in _old(now):
         assert tool["inputSchema"] == before[tool["name"]], tool["name"]
 
 
 def test_every_tool_answers_in_the_same_shape(now):
     before = {t["name"]: t["outputSchema"] for t in BEFORE["tools"]}
-    for tool in now["tools"]:
+    for tool in _old(now):
         assert tool["outputSchema"] == before[tool["name"]], tool["name"]
 
 
 def test_every_tool_keeps_its_description(now):
     before = {t["name"]: t["description_sha256"] for t in BEFORE["tools"]}
-    for tool in now["tools"]:
+    for tool in _old(now):
         assert tool["description_sha256"] == before[tool["name"]], tool["name"]
 
 
