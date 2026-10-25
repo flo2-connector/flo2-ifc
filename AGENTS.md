@@ -76,7 +76,10 @@ Every MCP server Anthony runs carries all three. Keep them true here:
   fails the dependency check.
 - **Bump one dependency per pull request**, and say what the bump changes.
 - **Moving the ifcopenshell-mcp pin** follows README.md, "Moving the ifcopenshell-mcp pin".
-- **No pyvista.** It is 900 MB, and only `ifc_render` needs it.
+- **pyvista and VTK only for `ifc_render`** (since 0.7.0, when flo2's door began to offer it: flo2's design
+  1a97fc1f1de4d5d2, `dec:a-chat-renders-a-building-model-in-3d`). They add about 890 MB to the image (660 MB to
+  1.55 GB). The image draws with Mesa's EGL on the CPU (llvmpipe), with no display; nothing else may need OpenGL.
+  `tools/measure.py` measures a render's peak memory in flo2's container shape, and flo2's broker sets its cap from it.
 - **The image is confined from outside.** flo2's sandbox runs it with:
   - `--network none`;
   - `--read-only`;
@@ -107,7 +110,8 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
   - ifcmcp's 25 tools and flo2-ifc's thirteen, with the readers', measures', checks' and building steps' arguments;
   - that `ifc_new` and then `ifc_summary` both answer;
   - that a synthetic millimetre house reads whole through the readers, and is measured and drawn (a PNG through
-    cairo, so the image's cairo library and fonts are checked too).
+    cairo, so the image's cairo library and fonts are checked too), and rendered in 3D with `ifc_render` (so the
+    image's off-screen OpenGL is checked too).
 
   Set `FLO2_IFC_SERVER` to a command line, such as a `docker run` of the image, to ask a different server the same
   questions.
@@ -122,6 +126,8 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
 - `tests/test_starting_model.py` takes the IFC text out of the starting model's page and holds every variant it
   describes to no error under `ifc_validate` with express rules and buildingSMART's rules. A change to that page is a
   change to what flo2 serves: flo2 re-pins to take it.
+- `tests/test_rendering.py` renders the synthetic house in 3D with `ifc_render` with no display: its size, its
+  shading, each side, a selector and a picked-out element.
 - `tests/test_measuring.py` and `tests/test_drawing.py` test the measures and the drawings on `models.measured_site()`,
   whose sizes are known (`models.SITE`).
 - `tests/test_manifests.py` validates the Agent Plugins manifests against the schemas in `tests/schemas/`, and checks
@@ -163,7 +169,8 @@ python3 tools/dependency_currency.py
 | `plugin.json`, `mcp.json` | the plugin, Agent Plugins format |
 | `.claude-plugin/plugin.json`, `.mcp.json` | the plugin, Claude Code format |
 | `tools/dependency_currency.py`, `dependency-holds.toml` | the monthly dependency check, and its holds |
-| `skills/read-a-building-model/references/starting-a-model.md` | the starting model a chat copies to start a building model from nothing; flo2 serves an unchanged copy beside its skill `read-a-building-model` |
+| `tools/measure.py` | a session's peak memory while it renders, in flo2's container shape, for the broker's cap |
+| `skills/read-a-building-model/` | the skill a chat reads (since 0.7.0): its rules in `SKILL.md`, its recipes in `references/` (each named by SKILL.md), among them `starting-a-model.md`, the starting model a chat copies; flo2 serves the whole folder unchanged, and `tests/test_skill.py` holds each file to 16,000 bytes. A new feature adds a page or grows one, never the whole skill |
 | `tests/` | the smoke, tool-list, reader, starting-model, manifest and dependency-check tests, the synthetic models, 0.3.1's tool list, and the vendored schemas |
 | `.github/workflows/ci.yml` | tests on Python 3.12, and the image built and run as flo2 confines it |
 | `.github/workflows/dependencies.yml` | the monthly dependency check |

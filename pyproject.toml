@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flo2-ifc"
-version = "0.6.0"
+version = "0.7.0"
 description = "The exact ifcmcp set flo2.io runs: the tools of IfcOpenShell's MCP server for IFC building models, served on the MCP Python SDK 2.x, with IDS checks and buildingSMART's validation rules, pinned."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -53,6 +53,16 @@ dependencies = [
   # A drawing's picture: the SVG rendered to PNG. It needs the cairo library,
   # which the Dockerfile installs in the image (libcairo2).
   "cairosvg==2.9.1",
+  # ifc_render (ifcquery's render module, ifcmcp's 3D picture): since 0.7.0,
+  # when flo2's door began to offer it (flo2's design 1a97fc1f1de4d5d2,
+  # dec:a-chat-renders-a-building-model-in-3d). ifcquery imports pyvista if it
+  # can and fails the tool otherwise. pyvista draws with VTK, pinned here too
+  # because VTK decides how it draws with no display: its Linux wheel finds
+  # an OpenGL at run time, and the image gives it Mesa's off-screen one
+  # (the Dockerfile). Their own dependencies (matplotlib, pillow, pooch,
+  # scooby, cyclopts) are transitive.
+  "pyvista==0.49.1",
+  "vtk==9.7.1",
   # ifc_check_ids and ifc_write_ids (src/flo2_ifc/checking.py): IfcOpenShell's
   # own IDS checker and IDS API, with the IDS 1.0 XSD it ships. ifctester
   # leaves its helpers unpinned; these two decide what an IDS says and

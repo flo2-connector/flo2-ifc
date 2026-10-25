@@ -137,10 +137,14 @@ def _ifcmcp_tools() -> _Recorder:
     """Every tool ifcmcp's own server defines, as it defines it.
 
     ifcmcp's server.py imports FastMCP from mcp 1.x, which mcp 2.x does not
-    have, so on mcp 2.x both its FastMCP and its ImageContent are None. They
-    are set, for this one call, to the recorder and to mcp 2.x's ImageContent
-    (which still accepts ifcmcp's ``mimeType=``, and is the name its image
-    tools' return annotations resolve to), and put back after. If a later
+    have, so on mcp 2.x both its FastMCP and its ImageContent are None.
+    FastMCP is set, for this one call, to the recorder, and put back after.
+    ImageContent is set to mcp 2.x's (which still accepts ifcmcp's
+    ``mimeType=``, and is the name its image tools' return annotations resolve
+    to) and LEFT SET: ifc_render and ifc_plot look it up in that module when
+    they are CALLED, to wrap their PNG. Until 0.7.0 it was put back to None
+    after the recording, so both failed with "'NoneType' object is not
+    callable" once they had drawn; nothing offered either then. If a later
     ifcmcp builds its server some other way, this fails loudly at start, and
     the smoke and tool-list tests with it."""
     import ifcmcp.server as ifcmcp_server
@@ -148,12 +152,12 @@ def _ifcmcp_tools() -> _Recorder:
 
     if not hasattr(ifcmcp_server, "FastMCP") or not hasattr(ifcmcp_server, "ImageContent"):
         raise RuntimeError("flo2-ifc cannot read this build of ifcmcp's server: it no longer names FastMCP and ImageContent")
-    saved = (ifcmcp_server.FastMCP, ifcmcp_server.ImageContent)
+    saved = ifcmcp_server.FastMCP
     ifcmcp_server.FastMCP, ifcmcp_server.ImageContent = _Recorder, ImageContent
     try:
         recorded = ifcmcp_server.build_server()
     finally:
-        ifcmcp_server.FastMCP, ifcmcp_server.ImageContent = saved
+        ifcmcp_server.FastMCP = saved
     if not isinstance(recorded, _Recorder) or not recorded.tools:
         raise RuntimeError("flo2-ifc read no tools from this build of ifcmcp's server")
     return recorded
