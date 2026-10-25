@@ -2,7 +2,32 @@
 
 flo2-ifc's versions, newest first. Versions before 0.3.1 are described in README.md, in the sections marked "since".
 
-## 0.5.1 (unreleased)
+## 0.6.0 (unreleased)
+
+Four tools are added, so this is a minor release. Every tool 0.5.1 served is unchanged.
+
+- **Building steps: a model's ordinary parts, one call each** (flo2's design 1a97fc1f1de4d5d2,
+  `dec:a-chat-builds-a-models-ordinary-parts-with-one-call-each`). Measured on 2026-10-24, a chat building a
+  24-element shell through `ifc_shape` and `ifc_edit` spent 250 calls, about 6 to 8 an element
+  (`fact:building-a-models-shell-takes-about-6-helper-calls-per-element-2026-10-24`). Each step creates the element,
+  gives it its shape, places it, puts it on its storey and links it to the design part it realizes, from what a
+  person would say, in the model's own length unit:
+  - `ifc_add_wall`: a wall along a baseline, with its height and thickness, optionally a sloped top
+    (`height_at_end`) or a gable end (`peak_height`), centred on the line or on either side of it;
+  - `ifc_add_slab`: a slab over a footprint, its top at the storey's level;
+  - `ifc_add_roof`: a shed or gable roof over a footprint (an `IfcRoof` of one or two sloped roof planes), from its
+    eave height, slope (rise over run), thickness and overhang;
+  - `ifc_add_space`: a room over a footprint, part of its storey, with its height.
+
+  `realizes` keeps the design part's id as a reference in the classification "flo2 design". Each step uses
+  IfcOpenShell's own api functions (`geometry.add_wall_representation` with clippings, `add_slab_representation`
+  with `x_angle`, `edit_object_placement`, `spatial.assign_container`, `aggregate.assign_object`,
+  `classification.add_reference`), checks every input before it touches the model, and runs in one transaction, so a
+  refused step changes nothing. `ifc_edit` and `ifc_shape` stay for anything unusual. `tests/test_building.py` builds a
+  small shell through the server in 7 calls where the old way took 57, and holds it to express rules and
+  buildingSMART's normative rules.
+
+## 0.5.1
 
 The tools a chat sees are unchanged (names, arguments and descriptions), so this is a patch release.
 

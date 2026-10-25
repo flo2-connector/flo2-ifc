@@ -168,6 +168,42 @@ The page is flo2-ifc's half of the skill `read-a-building-model`, which flo2 wri
 beside it as an unchanged copy at the commit it pins, as it serves flo2-calc's references, and its CI compares the two
 byte for byte.
 
+## Building steps (since 0.6.0)
+
+A chat that built a 24-element shell (walls, a slab, a roof, rooms) through ifcmcp's `ifc_shape` and `ifc_edit`
+spent 250 calls, about 6 to 8 an element, because each IfcOpenShell function is one call: a polyline, an extrusion
+and a representation from the shape builder, then `root.create_entity`, `geometry.assign_representation`,
+`geometry.edit_object_placement`, `classification.add_reference` and `spatial.assign_container` (flo2's design
+1a97fc1f1de4d5d2, `fact:building-a-models-shell-takes-about-6-helper-calls-per-element-2026-10-24`). It also needed
+to know IFC to make an ordinary wall. Anthony's decision (`dec:a-chat-builds-a-models-ordinary-parts-with-one-call-each`)
+is a few steps shaped like what a person says, each ONE call:
+
+| Step | What a person gives | What it makes |
+|---|---|---|
+| `ifc_add_wall` | a baseline (`start`, `end`), `height`, `thickness`; optionally `height_at_end` (a sloped top) or `peak_height` (a gable end), `base_offset`, `align` (centre, left or right of the line) | an `IfcWall`, contained in its storey |
+| `ifc_add_slab` | a `footprint` (corners in order), `thickness`; optionally `top_offset`, `kind` (floor or baseslab) | an `IfcSlab`, its top at the storey's level, contained in it |
+| `ifc_add_roof` | a `footprint`, `kind` (shed or gable), `eave_height`, `slope` (rise over run), `thickness`; optionally `overhang` | an `IfcRoof` contained in its storey, made of one (shed) or two (gable) sloped `IfcSlab` roof planes |
+| `ifc_add_space` | a `footprint`, `height`; optionally `floor_offset`, `long_name` | an `IfcSpace`, part of its storey as rooms are |
+
+Points are `[x, y]` in plan and every length is in the model's own length unit (`ifc_units`), the numbers `ifc_extent`
+gives; heights are above the storey's level. Each step takes an optional `name`, and `realizes`, the id of the design
+part the element realizes (for example `cmp:north-wall`), kept as an `IfcClassificationReference` with that
+identification in the classification "flo2 design". A shed roof's low eave runs along the footprint's first side (its
+first two corners); a gable's ridge runs parallel to it, halfway across.
+
+Inside, each step uses IfcOpenShell's own api: `root.create_entity`; `geometry.add_wall_representation` (with
+`Clipping` planes for a sloped or peaked top) or `geometry.add_slab_representation` (with its `x_angle` for a roof
+plane); `geometry.assign_representation`; `spatial.assign_container` or `aggregate.assign_object`;
+`geometry.edit_object_placement` (relative to the storey, or to the roof for its planes); and
+`classification.add_classification` and `classification.add_reference`. Every input is checked before the model is
+touched, and the step runs in one IfcOpenShell transaction, so a refused or failed step leaves the model as it was. A
+step is counted as an edit, as `ifc_edit` is, so a measure says the copy was edited.
+
+The steps are additive: `ifc_edit` and `ifc_shape` stay for anything unusual. `tests/test_building.py` builds a small
+shell through the server (4 walls, two with sloped tops, a slab, a shed roof with an overhang, and a room) in 7 calls,
+and the same shell the old way in 57; the new one validates with express rules and passes buildingSMART's normative
+rules.
+
 ## Where ifcmcp comes from (since 0.4.0)
 
 ifcmcp is two parts. `core.py` (`IfcSession`) is the tool code: glue over IfcOpenShell's own `ifcquery` and `ifcedit`,
@@ -314,20 +350,22 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 ## The tests and the checks
 
-`python -m pytest` runs ten test files:
+`python -m pytest` runs eleven test files:
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp 2.3.0 client. It checks that:
   - the server initializes as `ifc-mcp`, with instructions;
-  - it lists ifcmcp's 25 tools and flo2-ifc's nine, and the readers, measures and checks take their arguments;
+  - it lists ifcmcp's 25 tools and flo2-ifc's thirteen, and the readers, measures, checks and building steps take
+    their arguments;
   - `ifc_new` and then `ifc_summary` both answer;
   - a synthetic millimetre house (`tests/models.py`), opened with `ifc_load`, reads whole: its units, a page of the
     tree, doors by storey, the roof's top, a room's storey, and a complete validation; and it is measured and drawn
     (a footprint, a volume, and a plan rendered to PNG, which checks the image's cairo library and fonts); an IDS is
     written and the house checked against it (one specification passes, one fails, both reports are written), an
-    empty IDS is refused, and buildingSMART's critical and informal-proposition rules run on it.
+    empty IDS is refused, and buildingSMART's critical and informal-proposition rules run on it; and a wall is built
+    on it in one call (`ifc_add_wall`).
 - `tests/test_tool_list.py` starts it the same way and compares what it lists with flo2-ifc 0.3.1's list
   (`tests/tools-0.3.1.json`, read from 0.3.1 over stdio): the server's name and instructions, 0.3.1's 31 tools in
-  order (and only the three checks added since),
+  order (and only the three checks and the four building steps added since),
   each one's input and output schemas, its description (by sha256, so ifcmcp's LGPL text is not copied here), and the
   reason each of ten failing ifcmcp calls gives. A difference means the tools changed, and flo2's real-ifcmcp door
   test must change with them.

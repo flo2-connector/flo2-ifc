@@ -46,6 +46,8 @@ EXPECTED_TOOLS = {
     "ifc_extent", "ifc_units", "ifc_footprint", "ifc_volume", "ifc_distance", "ifc_draw",
     # since 0.5.0: IDS and buildingSMART's rules (src/flo2_ifc/checking.py, rules.py)
     "ifc_check_ids", "ifc_write_ids", "ifc_check_rules",
+    # since 0.6.0: the building steps, one call an element (src/flo2_ifc/building.py)
+    "ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space",
 }
 
 #: The optional arguments flo2-ifc's readers add to ifcmcp's tools.
@@ -60,6 +62,18 @@ ADDED_ARGUMENTS = {
     "ifc_check_ids": {"ids_path", "report_path", "start", "offset", "limit"},
     "ifc_write_ids": {"description", "output_path"},
     "ifc_check_rules": {"rule_sets", "start", "offset", "limit"},
+    "ifc_add_wall": {"storey", "start", "end", "height", "thickness", "height_at_end", "peak_height", "base_offset", "align", "name", "realizes"},
+    "ifc_add_slab": {"storey", "footprint", "thickness", "top_offset", "kind", "name", "realizes"},
+    "ifc_add_roof": {"storey", "footprint", "kind", "eave_height", "slope", "thickness", "overhang", "name", "realizes"},
+    "ifc_add_space": {"storey", "footprint", "height", "floor_offset", "name", "long_name", "realizes"},
+}
+
+#: The arguments each building step requires.
+BUILD_REQUIRED = {
+    "ifc_add_wall": {"storey", "start", "end", "height", "thickness"},
+    "ifc_add_slab": {"storey", "footprint", "thickness"},
+    "ifc_add_roof": {"storey", "footprint", "kind", "eave_height", "slope", "thickness"},
+    "ifc_add_space": {"storey", "footprint", "height"},
 }
 
 #: An IDS the smoke test writes and checks the house against: its spaces store
@@ -147,6 +161,9 @@ async def round_trip() -> dict:
             out["bad_ids"] = (bad.is_error, "".join(getattr(b, "text", "") for b in bad.content))
             rules = await session.call_tool("ifc_check_rules", {"rule_sets": "critical,informal-proposition", "limit": 5})
             out["rules"] = (rules.is_error, "".join(getattr(b, "text", "") for b in rules.content))
+            # A building step: one call makes a wall on the house's ground floor, in its millimetres.
+            out["wall"] = json.loads(text_of(await session.call_tool("ifc_add_wall", {"storey": "GROUND", "start": [0, 5000], "end": [3000, 5000], "height": 2700, "thickness": 100, "realizes": "cmp:smoke-wall"})))
+            out["wall_extent"] = json.loads(text_of(await session.call_tool("ifc_extent", {"element_id": out["wall"]["made"]["id"]})))
     return out
 
 
@@ -160,10 +177,10 @@ def test_initialize_names_the_server_and_gives_instructions(served):
     assert served["instructions"] and "ifc_load" in served["instructions"]
 
 
-def test_list_tools_gives_ifcmcps_25_tools_and_flo2_ifcs_nine(served):
+def test_list_tools_gives_ifcmcps_25_tools_and_flo2_ifcs_thirteen(served):
     names = served["tools"]
-    assert len(names) == 34, names
-    assert len(set(names)) == 34, names
+    assert len(names) == 38, names
+    assert len(set(names)) == 38, names
     assert set(names) == EXPECTED_TOOLS
     for name in ("ifc_load", "ifc_summary", "ifc_edit", "ifc_plot", "ifc_render"):
         assert name in names
@@ -174,7 +191,7 @@ def test_the_readers_take_their_paging_and_filter_arguments(served):
         props = set(served["schemas"][tool].get("properties", {}))
         assert props == wanted, (tool, props)
         required = set(served["schemas"][tool].get("required", []))
-        own = {"ifc_check_ids": {"ids_path"}, "ifc_write_ids": {"description", "output_path"}}.get(tool, set())
+        own = {"ifc_check_ids": {"ids_path"}, "ifc_write_ids": {"description", "output_path"}, **BUILD_REQUIRED}.get(tool, set())
         assert required <= ({"query", "element_id"} | own) - ({"element_id"} if tool in ("ifc_extent", "ifc_footprint", "ifc_volume") else set()), (tool, required)
 
 
@@ -247,6 +264,14 @@ def test_buildingsmarts_rules_run_through_the_server(served):
     assert "critical" in said["rule_sets"]["ran"] and "IFC101" in said["rules_passed"]
     if said["complete"]:
         assert any(r["code"] == "GEM002" for r in said["rules_with_issues"]), said  # the house's rooms have no shape
+
+
+def test_a_wall_is_built_in_one_call_through_the_server(served):
+    wall = served["wall"]
+    assert wall["made"]["class"] == "IfcWall" and wall["storey"]["name"] == "GROUND"
+    assert wall["realizes"] == {"identification": "cmp:smoke-wall", "classification": "flo2 design"}
+    box = served["wall_extent"]["overall"]
+    assert box["min"] == pytest.approx([0, 4950, 0], abs=0.01) and box["max"] == pytest.approx([3000, 5050, 2700], abs=0.01)
 
 
 def test_version_is_one_line_naming_what_runs():

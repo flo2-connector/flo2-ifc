@@ -25,14 +25,19 @@ It holds the exact set flo2.io installs to run IfcOpenShell's ifcmcp:
 
 Its one piece of server code is a thin layer: `flo2_ifc.server.build_server` serves every tool ifcmcp's own server
 defines on flo2-ifc's own `MCPServer` (MCP Python SDK 2.x), then replaces seven of them (`ifc_summary`, `ifc_tree`, `ifc_select`, `ifc_info`, `ifc_relations`, `ifc_validate`,
-`ifc_quantify`) with readers that page, filter, keep to one call's time and name the model's units, and adds nine
+`ifc_quantify`) with readers that page, filter, keep to one call's time and name the model's units, and adds thirteen
 (`ifc_extent`, `ifc_units`; since 0.3.0 the measures `ifc_footprint`, `ifc_volume`, `ifc_distance` and the drawing
-`ifc_draw`; since 0.5.0 the checks `ifc_check_ids`, `ifc_write_ids` and `ifc_check_rules`). README.md, "The readers for a whole building" and "Measures and drawings", says why each one exists. It
+`ifc_draw`; since 0.5.0 the checks `ifc_check_ids`, `ifc_write_ids` and `ifc_check_rules`; since 0.6.0 the building
+steps `ifc_add_wall`, `ifc_add_slab`, `ifc_add_roof` and `ifc_add_space`). README.md, "The readers for a whole
+building", "Measures and drawings", "Checks" and "Building steps", says why each one exists. It
 also watches the session's editing methods (`_watch_changes`), so a measure says when the copy was edited and a kept
 mesh is never drawn after an edit. Keep it thin:
 
 - a replacement keeps its tool's name and only adds optional arguments;
 - a reader returns plain data and never writes the model; `ifc_draw` writes only its two files, where it is told;
+- a building step (`building.py`) writes only the session's copy, with IfcOpenShell's own api functions (never an
+  entity built by hand where a function exists), checks every input before it touches the model, and runs in one
+  IfcOpenShell transaction, so a refused or failed step changes nothing; it is counted as an edit, as `ifc_edit` is;
 - a measure carries `cite` (the model file and its sha256, the GlobalIds, the unit and the method), and a volume is
   never given for an open mesh;
 - every limit (characters, seconds, the geometry library and batch) is an environment setting with a measured default;
@@ -99,7 +104,7 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp client. It checks:
   - the server's name and instructions;
-  - ifcmcp's 25 tools and flo2-ifc's nine, with the readers', measures' and checks' arguments;
+  - ifcmcp's 25 tools and flo2-ifc's thirteen, with the readers', measures', checks' and building steps' arguments;
   - that `ifc_new` and then `ifc_summary` both answer;
   - that a synthetic millimetre house reads whole through the readers, and is measured and drawn (a PNG through
     cairo, so the image's cairo library and fonts are checked too).
@@ -109,6 +114,11 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
 - `tests/test_tool_list.py` compares the tools it lists (names in order, input and output schemas, descriptions by
   sha256) and the reasons ten failing ifcmcp calls give with flo2-ifc 0.3.1's (`tests/tools-0.3.1.json`).
 - `tests/test_reading.py` tests each reader on synthetic models, including a partial answer at a zero time limit.
+- `tests/test_building.py` tests each building step on the starting model (feet and metres) and the millimetre
+  house: where each element reaches, its volume or footprint, its storey and its design-part link, every refusal (and
+  that a refused step changes nothing), and validation with express rules. Through the server it builds a small
+  shell (4 walls, two with sloped tops, a slab, a shed roof and a room) in 7 calls, builds the same shell the old way
+  with `ifc_shape` and `ifc_edit` (57 calls), and holds the new one to buildingSMART's normative rules.
 - `tests/test_starting_model.py` takes the IFC text out of the starting model's page and holds every variant it
   describes to no error under `ifc_validate` with express rules and buildingSMART's rules. A change to that page is a
   change to what flo2 serves: flo2 re-pins to take it.
@@ -141,7 +151,8 @@ python3 tools/dependency_currency.py
 |---|---|
 | `pyproject.toml` | **the pinned set**, and the `flo2-ifc` console script |
 | `src/flo2_ifc/__init__.py` | `main()`: the `flo2-ifc` command |
-| `src/flo2_ifc/server.py` | the server on MCP SDK 2.x: ifcmcp's tools, the readers in front of seven, and nine added |
+| `src/flo2_ifc/server.py` | the server on MCP SDK 2.x: ifcmcp's tools, the readers in front of seven, and thirteen added |
+| `src/flo2_ifc/building.py` | the building steps: a wall, a slab, a roof and a room, each made, shaped, placed, put on its storey and linked to its design part in one call |
 | `src/flo2_ifc/reading.py` | the readers: paging, storeys, units, extent (and height above a datum), timed validation |
 | `src/flo2_ifc/geometry.py` | the meshes (kept per session), footprints, volumes and closedness, distances, and `cite` |
 | `src/flo2_ifc/drawing.py` | plans, sections and elevations to scale, as SVG and PNG |
