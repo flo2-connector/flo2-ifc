@@ -21,7 +21,14 @@ When a decision rests on a number in the edited model, it goes to the calc helpe
 
 A wall, slab, roof or room is ONE call: made, shaped, placed, on its storey and linked to the design part it
 realizes (`realizes`: its id, `"cmp:north-wall"`). Lengths are in the model's OWN unit, heights above
-the storey's level, points `[x, y]` in plan.
+the storey's level, points `[x, y]` in plan, in the step's `"frame"`:
+
+- `"frame": "world"` (the default): the model's world plan, the numbers `ifc_extent` and `ifc_info` report.
+- `"frame": "storey"`: the storey's own axes. Its placement turns and shifts the points into the world, so `[0, 0]`
+  is the storey's origin and x runs along its own x axis. Use it when the building is turned on its site (`ifc_info`
+  on the storey: a placement that is not square) and the points come from the plan's own dimensions.
+
+The reply's `frame` says which was used, and the storey's origin and turn. Say it to the person when they differ.
 
 - `ifc_add_wall`: `"start": [0, 0], "end": [30, 0], "height": 10, "thickness": 0.5`, centred on that line; a sloped
   top takes `"height_at_end"`, a gable end `"peak_height"`.

@@ -62,10 +62,10 @@ ADDED_ARGUMENTS = {
     "ifc_check_ids": {"ids_path", "report_path", "start", "offset", "limit"},
     "ifc_write_ids": {"description", "output_path"},
     "ifc_check_rules": {"rule_sets", "start", "offset", "limit"},
-    "ifc_add_wall": {"storey", "start", "end", "height", "thickness", "height_at_end", "peak_height", "base_offset", "align", "name", "realizes"},
-    "ifc_add_slab": {"storey", "footprint", "thickness", "top_offset", "kind", "name", "realizes"},
-    "ifc_add_roof": {"storey", "footprint", "kind", "eave_height", "slope", "thickness", "overhang", "name", "realizes"},
-    "ifc_add_space": {"storey", "footprint", "height", "floor_offset", "name", "long_name", "realizes"},
+    "ifc_add_wall": {"storey", "start", "end", "height", "thickness", "height_at_end", "peak_height", "base_offset", "align", "name", "realizes", "frame"},
+    "ifc_add_slab": {"storey", "footprint", "thickness", "top_offset", "kind", "name", "realizes", "frame"},
+    "ifc_add_roof": {"storey", "footprint", "kind", "eave_height", "slope", "thickness", "overhang", "name", "realizes", "frame"},
+    "ifc_add_space": {"storey", "footprint", "height", "floor_offset", "name", "long_name", "realizes", "frame"},
 }
 
 #: The arguments each building step requires.
@@ -164,6 +164,9 @@ async def round_trip() -> dict:
             # A building step: one call makes a wall on the house's ground floor, in its millimetres.
             out["wall"] = json.loads(text_of(await session.call_tool("ifc_add_wall", {"storey": "GROUND", "start": [0, 5000], "end": [3000, 5000], "height": 2700, "thickness": 100, "realizes": "cmp:smoke-wall"})))
             out["wall_extent"] = json.loads(text_of(await session.call_tool("ifc_extent", {"element_id": out["wall"]["made"]["id"]})))
+            # The same in the storey's own frame (since 0.8.0): the house's storeys are not turned, so it lands the same.
+            out["wall_storey"] = json.loads(text_of(await session.call_tool("ifc_add_wall", {"storey": "GROUND", "start": [0, 6000], "end": [3000, 6000], "height": 2700, "thickness": 100, "frame": "storey"})))
+            out["wall_storey_extent"] = json.loads(text_of(await session.call_tool("ifc_extent", {"element_id": out["wall_storey"]["made"]["id"]})))
             # ifcmcp's 3D picture (since 0.7.0), written where the confined image can write.
             rendered = await session.call_tool("ifc_render", {"view": "iso", "output_path": f"{tempfile.gettempdir()}/flo2-ifc-smoke-render.png"})
             out["render"] = (rendered.is_error, [(b.type, getattr(b, "mime_type", None), getattr(b, "data", None) or getattr(b, "text", "")) for b in rendered.content])
@@ -275,6 +278,10 @@ def test_a_wall_is_built_in_one_call_through_the_server(served):
     assert wall["realizes"] == {"identification": "cmp:smoke-wall", "classification": "flo2 design"}
     box = served["wall_extent"]["overall"]
     assert box["min"] == pytest.approx([0, 4950, 0], abs=0.01) and box["max"] == pytest.approx([3000, 5050, 2700], abs=0.01)
+    # The reply names the frame its points were read in: "world" unless the call asks for "storey".
+    assert wall["frame"]["used"] == "world" and served["wall_storey"]["frame"]["used"] == "storey"
+    box = served["wall_storey_extent"]["overall"]
+    assert box["min"] == pytest.approx([0, 5950, 0], abs=0.01) and box["max"] == pytest.approx([3000, 6050, 2700], abs=0.01)
 
 
 def test_the_house_is_rendered_in_3d_through_the_server(served):

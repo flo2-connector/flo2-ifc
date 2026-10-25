@@ -2,6 +2,43 @@
 
 flo2-ifc's versions, newest first. Versions before 0.3.1 are described in README.md, in the sections marked "since".
 
+## 0.8.0 (unreleased)
+
+The four building steps each take a new optional argument, `frame`, and the measures and drawings now cut openings,
+so a number a chat reads can change: this is a minor release. No tool is added or removed; every other tool's name,
+arguments and description are 0.7.0's. Both fix root causes found on 2026-10-25 (flo2-ifc's design
+1510fc3728665dbf, `dec:building-steps-take-a-frame-and-measures-cut-openings`, accepted by Anthony on 2026-10-25).
+
+- **The building steps take `frame`** (`fact:building-steps-take-plan-points-in-world-coordinates-not-the-storeys-frame-2026-10-25`).
+  `ifc_add_wall`, `ifc_add_slab`, `ifc_add_roof` and `ifc_add_space` read their `[x, y]` points in the model's WORLD
+  plan and only their heights relative to the storey, and their texts said only "[x, y] in plan", so a chat thinking
+  in a turned building's own axes had every part turned and shifted (reproduced: a wall `[0, 0]` to `[5, 0]` on a
+  storey turned 26.03 degrees at (10, 5) landed at world (0, 0), -26.03 degrees and 11.18 m off in the storey's
+  frame). Now `frame: "storey"` reads them in the storey's own axes, which its placement turns and shifts into the
+  world; `frame: "world"` reads them as `ifc_extent` and `ifc_info` report them, and is the default, so no chat
+  breaks. Every reply says which frame it used (`frame.used`), with the storey's origin and turn, and a world-frame
+  reply on a turned or shifted storey says so. The tools' texts, the skill's `references/editing.md` and the README
+  name the frame. Making `"storey"` the default needs a release that says so first. `tests/test_building.py` builds
+  every step on a storey turned and shifted through its site and, separately, through its building
+  (`models.turned_storey`).
+- **Measures and drawings cut openings** (`fact:measures-and-drawings-skip-opening-subtraction-so-a-cut-wall-reads-whole-2026-10-25`).
+  The meshes behind `ifc_volume`, `ifc_footprint`, `ifc_distance` and `ifc_draw` (in flo2, `draw_model`) were made
+  with `ifc_extent`'s geometry setting, opening subtraction OFF, on the premise that a Revit export's meshes come
+  already cut. A wall with an opening made in the model was measured whole (3.0 m3 for 2.622) and drawn solid, its
+  door hidden. They now have their own setting, openings cut (`geometry.mesh_settings`), and a mesh is kept per
+  setting; `ifc_extent`'s boxes keep the fast setting. The premise was false for the public samples too: their walls
+  held 54.50 m3, not 64.78 (AC20-FZK-Haus), and 207.92 m3, not 240.61 (the Duplex, a Revit export).
+  `tests/test_openings.py` measures and draws a wall with an opening and a door (`models.wall_with_a_door`).
+- **What cutting costs**, cold, one CPU (an i5-10300H core), before and after, in seconds:
+
+  | Model | `ifc_volume` of every wall | the ground storey's plan | a section through a door |
+  |---|---|---|---|
+  | AC20-FZK-Haus (2.6 MB; 13 walls, 17 openings) | 0.13 to 1.92 | 0.49 to 0.77 | 0.57 to 2.35 |
+  | Duplex (2.4 MB; 57 walls, 50 openings) | 0.15 to 0.44 | 0.31 to 0.31 | 0.90 to 1.43 |
+
+  Up to 15 times slower for a volume, and still a few seconds; a kept mesh costs nothing the second time. The other
+  geometry libraries were no faster with openings cut, so `hybrid-cgal-simple-opencascade` stays.
+
 ## 0.7.0 (unreleased)
 
 No tool is added or removed, and every tool's name, arguments and description are 0.6.0's; `ifc_render`, listed and
