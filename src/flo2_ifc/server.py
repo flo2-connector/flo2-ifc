@@ -592,10 +592,11 @@ def build_server() -> Any:
         align: str = "centre",
         name: str = "",
         realizes: str = "",
+        frame: str = "world",
     ) -> dict[str, Any]:
         """Add a WALL in one call: made, shaped, placed, put on its storey and
         linked to the design part it realizes. It runs along a baseline from
-        ``start`` to ``end`` (points in plan, [x, y]), stands on the storey's
+        ``start`` to ``end`` (points [x, y] in plan, in ``frame``), stands on the storey's
         level, and is ``height`` high and ``thickness`` thick. A sloped top
         rises from ``height`` at the start to ``height_at_end`` at the end; a
         gable end rises from ``height`` at both ends to ``peak_height`` in the
@@ -617,9 +618,14 @@ def build_server() -> Any:
         :param name: Optional: its name, e.g. "North wall".
         :param realizes: Optional: the id of the design part it realizes, e.g.
             "cmp:north-wall"; kept as a reference in the classification "flo2 design".
+        :param frame: Optional: the frame [x, y] are in. "world" (default):
+            the model's world plan, as ifc_extent and ifc_info report it.
+            "storey": the storey's own axes, which its placement turns and
+            shifts into the world (a plan's dimensions along a turned
+            building's walls). The reply's ``frame`` says which was used.
         """
         # 0 is "not given": a plain number keeps the tool's schema plain (no anyOf with null).
-        return built(building.add_wall(model(), storey, start, end, height, thickness, height_at_end or None, peak_height or None, base_offset, align, name, realizes))
+        return built(building.add_wall(model(), storey, start, end, height, thickness, height_at_end or None, peak_height or None, base_offset, align, name, realizes, frame))
 
     @tool
     def ifc_add_slab(
@@ -630,10 +636,11 @@ def build_server() -> Any:
         kind: str = "floor",
         name: str = "",
         realizes: str = "",
+        frame: str = "world",
     ) -> dict[str, Any]:
         """Add a SLAB in one call: made, shaped, placed, put on its storey and
         linked to the design part it realizes. It covers ``footprint`` (its
-        corners in order, each [x, y] in plan), its top at the storey's level
+        corners in order, each [x, y] in plan, in ``frame``), its top at the storey's level
         (plus ``top_offset``), ``thickness`` deep below it. Every length is in
         the model's length unit (ifc_units). Changes only the session's copy.
 
@@ -644,8 +651,13 @@ def build_server() -> Any:
         :param kind: Optional: "floor" (default) or "baseslab".
         :param name: Optional: its name.
         :param realizes: Optional: the id of the design part it realizes.
+        :param frame: Optional: the frame [x, y] are in. "world" (default):
+            the model's world plan, as ifc_extent and ifc_info report it.
+            "storey": the storey's own axes, which its placement turns and
+            shifts into the world (a plan's dimensions along a turned
+            building's walls). The reply's ``frame`` says which was used.
         """
-        return built(building.add_slab(model(), storey, footprint, thickness, top_offset, kind, name, realizes))
+        return built(building.add_slab(model(), storey, footprint, thickness, top_offset, kind, name, realizes, frame))
 
     @tool
     def ifc_add_roof(
@@ -658,6 +670,7 @@ def build_server() -> Any:
         overhang: float = 0.0,
         name: str = "",
         realizes: str = "",
+        frame: str = "world",
     ) -> dict[str, Any]:
         """Add a ROOF in one call: an IfcRoof on the storey, made of sloped
         roof planes (IfcSlab), shaped, placed and linked to the design part it
@@ -670,7 +683,7 @@ def build_server() -> Any:
         in the model's length unit (ifc_units). Changes only the session's copy.
 
         :param storey: The storey it sits on, by name or id.
-        :param footprint: The outline it covers, its corners in order, the eave side first.
+        :param footprint: The outline it covers, its corners [x, y] in order, in ``frame``, the eave side first.
         :param kind: "shed" or "gable".
         :param eave_height: The underside's height at the eave side, above the storey's level.
         :param slope: Rise over run, e.g. 0.25.
@@ -678,8 +691,13 @@ def build_server() -> Any:
         :param overhang: Optional: how far it reaches beyond the footprint all round (default 0).
         :param name: Optional: its name.
         :param realizes: Optional: the id of the design part it realizes.
+        :param frame: Optional: the frame [x, y] are in. "world" (default):
+            the model's world plan, as ifc_extent and ifc_info report it.
+            "storey": the storey's own axes, which its placement turns and
+            shifts into the world (a plan's dimensions along a turned
+            building's walls). The reply's ``frame`` says which was used.
         """
-        return built(building.add_roof(model(), storey, footprint, kind, eave_height, slope, thickness, overhang, name, realizes))
+        return built(building.add_roof(model(), storey, footprint, kind, eave_height, slope, thickness, overhang, name, realizes, frame))
 
     @tool
     def ifc_add_space(
@@ -690,10 +708,11 @@ def build_server() -> Any:
         name: str = "",
         long_name: str = "",
         realizes: str = "",
+        frame: str = "world",
     ) -> dict[str, Any]:
         """Add a ROOM (IfcSpace) in one call: made, shaped, placed, part of its
         storey as a room is, and linked to the design part it realizes. It
-        covers ``footprint`` (its corners in order, each [x, y] in plan) from
+        covers ``footprint`` (its corners in order, each [x, y] in plan, in ``frame``) from
         the storey's level up ``height``. Every length is in the model's length
         unit (ifc_units). Changes only the session's copy.
 
@@ -704,8 +723,13 @@ def build_server() -> Any:
         :param name: Optional: its name (often its number), e.g. "101".
         :param long_name: Optional: its long name, e.g. "Shop floor".
         :param realizes: Optional: the id of the design part it realizes.
+        :param frame: Optional: the frame [x, y] are in. "world" (default):
+            the model's world plan, as ifc_extent and ifc_info report it.
+            "storey": the storey's own axes, which its placement turns and
+            shifts into the world (a plan's dimensions along a turned
+            building's walls). The reply's ``frame`` says which was used.
         """
-        return built(building.add_space(model(), storey, footprint, height, floor_offset, name, long_name, realizes))
+        return built(building.add_space(model(), storey, footprint, height, floor_offset, name, long_name, realizes, frame))
 
     @tool
     def ifc_validate(express_rules: bool = False, start: int = 0) -> dict[str, Any]:

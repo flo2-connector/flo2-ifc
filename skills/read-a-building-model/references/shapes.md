@@ -42,6 +42,10 @@ the shape builder (`ifc_shape`) are in the model's OWN unit. On a millimetre mod
 3. The window: `root.create_entity` with `"IfcWindow"`, a thin shape the size of the opening, placed in
    it, then `feature.add_filling` with `{"opening": <opening>, "element": <window>}`.
 
+`ifc_volume`, `ifc_footprint`, `ifc_distance` and the drawings cut the opening from the wall (the door or window then
+shows in an elevation and a section); `ifc_extent`'s box does not change, as an opening cannot widen it.
+`edit_object_placement`'s matrix is in the WORLD frame, as `ifc_extent` reports it.
+
 Find where the wall is before you cut it. Its placement is in `ifc_info`, but some walls keep their
 position inside their shape: a wall built as a block is one. If the opening misses the wall, nothing
 is cut, and `ifc_relations` on the wall still lists the opening. So say where you put it, and check

@@ -118,8 +118,9 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
 - `tests/test_tool_list.py` compares the tools it lists (names in order, input and output schemas, descriptions by
   sha256) and the reasons ten failing ifcmcp calls give with flo2-ifc 0.3.1's (`tests/tools-0.3.1.json`).
 - `tests/test_reading.py` tests each reader on synthetic models, including a partial answer at a zero time limit.
-- `tests/test_building.py` tests each building step on the starting model (feet and metres) and the millimetre
-  house: where each element reaches, its volume or footprint, its storey and its design-part link, every refusal (and
+- `tests/test_building.py` tests each building step on the starting model (feet and metres), the millimetre
+  house, and a storey turned and shifted through its site or its building (`models.turned_storey()`, each step's
+  `frame`, since 0.8.0): where each element reaches, its volume or footprint, its storey and its design-part link, every refusal (and
   that a refused step changes nothing), and validation with express rules. Through the server it builds a small
   shell (4 walls, two with sloped tops, a slab, a shed roof and a room) in 7 calls, builds the same shell the old way
   with `ifc_shape` and `ifc_edit` (57 calls), and holds the new one to buildingSMART's normative rules.
@@ -130,6 +131,8 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
   shading, each side, a selector and a picked-out element.
 - `tests/test_measuring.py` and `tests/test_drawing.py` test the measures and the drawings on `models.measured_site()`,
   whose sizes are known (`models.SITE`).
+- `tests/test_openings.py` measures and draws a wall with an opening and a door (`models.wall_with_a_door()`): the
+  meshes behind the measures and drawings cut openings (since 0.8.0); `ifc_extent`'s boxes do not need to.
 - `tests/test_manifests.py` validates the Agent Plugins manifests against the schemas in `tests/schemas/`, and checks
   that both formats agree.
 - `tests/test_dependency_currency.py` tests the dependency check against fake registry data. It makes no network calls.

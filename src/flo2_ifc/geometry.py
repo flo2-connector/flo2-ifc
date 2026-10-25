@@ -51,6 +51,8 @@ class Mesh:
     id: int
     verts: np.ndarray  # (n, 3) float64
     faces: np.ndarray  # (m, 3) int32
+    #: Whether the element's openings were cut from it (meshes(), "Openings").
+    openings_cut: bool = True
 
     @property
     def triangles(self) -> np.ndarray:
@@ -71,7 +73,9 @@ CACHE_MB = float(os.environ.get("FLO2_IFC_MESH_CACHE_MB", "256"))
 #: shape, a new or reloaded model). A mesh is kept only for the generation it
 #: was made in, so a drawing after an edit draws the edited model.
 _generation = 0
-_cache: dict[tuple[int, int], Mesh] = {}
+#: Kept meshes by (id(model), openings_cut, element id): a mesh is kept per setting, so a mesh made whole is never
+#: handed out where one with its openings cut was asked for.
+_cache: dict[tuple[int, bool, int], Mesh] = {}
 _cache_bytes = 0
 
 
@@ -116,30 +120,45 @@ def _keep(model: ifcopenshell.file, mesh: Mesh) -> None:
     key = id(model)
     if key not in _owners:
         _owners[key] = weakref.finalize(model, _forget_model, key)
-    _cache[(key, mesh.id)] = mesh
+    _cache[(key, mesh.openings_cut, mesh.id)] = mesh
     _cache_bytes += mesh.nbytes
 
 
-def meshes(model: ifcopenshell.file, elements: list[ifcopenshell.entity_instance], deadline: float) -> tuple[dict[int, Mesh], bool]:
-    """Each element's mesh, by id, made once a session, and whether time ran out.
+def mesh_settings(cut_openings: bool = True):
+    """IfcOpenShell's geometry settings for meshes: world coordinates, and openings CUT unless told otherwise.
 
-    Elements with no 3D shape are left out. Openings are not subtracted: a
-    Revit export's meshes come with their openings already cut (a large
-    model's shapes were measured to have the same triangles either way), and
-    the boolean work would cost time for nothing."""
+    Since 0.8.0 (dec:building-steps-take-a-frame-and-measures-cut-openings, from
+    fact:measures-and-drawings-skip-opening-subtraction-so-a-cut-wall-reads-whole-2026-10-25) the meshes have their
+    own settings. Until then they shared ifc_extent's (reading._geometry_settings), which skip opening subtraction
+    because an opening cannot widen a box; on the premise that a Revit export's meshes come already cut. That holds
+    for a Revit export and not for an opening made in the model (feature.add_feature, as the skill's recipe and
+    ifc_edit make one): such a wall was measured whole (3.0 m3 for 2.622) and drawn solid, with its door hidden. A
+    volume, a footprint, a distance and a drawing need the shape as built, so they take the cut one."""
+    s = reading._geometry_settings()
+    s.set("disable-opening-subtractions", not cut_openings)
+    return s
+
+
+def meshes(model: ifcopenshell.file, elements: list[ifcopenshell.entity_instance], deadline: float, cut_openings: bool = True) -> tuple[dict[int, Mesh], bool]:
+    """Each element's mesh, by id, made once a session per setting, and whether time ran out.
+
+    Elements with no 3D shape are left out, and so are openings themselves. OPENINGS ARE CUT (``cut_openings``,
+    mesh_settings()): what ifc_volume, ifc_footprint, ifc_distance and ifc_draw read is the element as built. The
+    bounding boxes (reading._boxes, ifc_extent) keep their own fast setting. A mesh is kept under the setting it was
+    made with."""
     import ifcopenshell.geom
 
     out: dict[int, Mesh] = {}
     todo = []
     for e in elements:
-        kept = _cache.get((id(model), e.id()))
+        kept = _cache.get((id(model), cut_openings, e.id()))
         if kept is not None:
             out[e.id()] = kept
         elif e.is_a("IfcProduct") and getattr(e, "Representation", None) and not e.is_a("IfcOpeningElement"):
             todo.append(e)
     if not todo:
         return out, False
-    settings = reading._geometry_settings()
+    settings = mesh_settings(cut_openings)
     for first in range(0, len(todo), reading.GEOMETRY_BATCH):
         if time.monotonic() > deadline:
             return out, True
@@ -151,7 +170,7 @@ def meshes(model: ifcopenshell.file, elements: list[ifcopenshell.entity_instance
             verts = np.asarray(shape.geometry.verts, dtype=np.float64).reshape(-1, 3)
             faces = np.asarray(shape.geometry.faces, dtype=np.int32).reshape(-1, 3)
             if len(verts) and len(faces):
-                mesh = Mesh(shape.id, verts, faces)
+                mesh = Mesh(shape.id, verts, faces, cut_openings)
                 out[shape.id] = mesh
                 _keep(model, mesh)
             more = it.next()
@@ -303,12 +322,12 @@ WELD = 1e-4
 SEAM_RATIO = 1e-6
 
 
-_closures: dict[tuple[int, int], dict[str, Any]] = {}
+_closures: dict[tuple[int, bool, int], dict[str, Any]] = {}
 
 
 def closure_of(model: ifcopenshell.file, mesh: Mesh) -> dict[str, Any]:
     """closure(mesh), kept with the mesh for the session's generation."""
-    key = (id(model), mesh.id)
+    key = (id(model), mesh.openings_cut, mesh.id)
     if _cache.get(key) is not mesh:
         return closure(mesh)
     if key not in _closures:

@@ -17,9 +17,22 @@ slope, all in the model's own length unit) and, in one call:
 - puts it on its storey (``spatial.assign_container``; a room is part of its storey, ``aggregate.assign_object``;
   a roof plane is part of its roof);
 - places it relative to that storey (``geometry.edit_object_placement``, from plan coordinates and the storey's
-  level);
+  level), reading the plan points in the frame the call names (``frame``, below);
 - links it to the design part it realizes (``classification.add_reference`` in the classification "flo2 design",
   the reference's identification being the part's id).
+
+THE FRAME (since 0.8.0; dec:building-steps-take-a-frame-and-measures-cut-openings, from
+fact:building-steps-take-plan-points-in-world-coordinates-not-the-storeys-frame-2026-10-25). Every step's plan points
+are read in one of two frames, and its reply says which:
+
+- ``"world"`` (the default, and the only frame before 0.8.0): [x, y] as ifc_extent and ifc_info report them, the
+  model's world plan. In a building turned on its site, a wall along the building's own side has world points that
+  are not square to the axes.
+- ``"storey"``: [x, y] in the storey's own frame, so the storey's placement (its turn about the vertical and its
+  offset, through the site and the building it stands in) carries them into the world: [0, 0] is the storey's origin
+  and x runs along its own x axis. A plan's dimensions, measured along the building's walls, are in this frame.
+
+Heights are always above the storey's level, in either frame.
 
 Nothing is hand-built where IfcOpenShell has a function for it. Every input is checked before the model is touched,
 and the steps run in one IfcOpenShell transaction, so a refused or failed step leaves the model as it was.
@@ -49,6 +62,8 @@ DESIGN_CLASSIFICATION = "flo2 design"
 WALL_ALIGN = ("centre", "left", "right")
 SLAB_KINDS = {"floor": "FLOOR", "baseslab": "BASESLAB"}
 ROOF_KINDS = {"shed": "SHED_ROOF", "gable": "GABLE_ROOF"}
+#: The frames a step's plan points can be given in (module docstring, "THE FRAME").
+FRAMES = ("world", "storey")
 #: The steepest roof plane a step makes, as rise over run (about 80 degrees).
 MAX_SLOPE = 6.0
 
@@ -105,6 +120,55 @@ def _text(value: Any, name: str) -> str:
     return value.strip()
 
 
+def _frame(value: Any) -> str:
+    """The frame a step's plan points are in: "world" (the default, also for an empty value) or "storey"."""
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        return "world"
+    said = value.strip().lower() if isinstance(value, str) else None
+    if said not in FRAMES:
+        raise ValueError(
+            f"frame is storey or world, not {value!r}: \"storey\" reads [x, y] in the storey's own axes (its placement turns "
+            "and shifts them into the world), \"world\" reads them as ifc_extent and ifc_info report them."
+        )
+    return said
+
+
+class Frame:
+    """Where a step's plan points are read: the world's plan, or the storey's own (turned and shifted) plan.
+
+    ``to_world`` carries a placement matrix built from plan points (and a world height) into the world; for "world"
+    it is the matrix itself."""
+
+    def __init__(self, storey: ifcopenshell.entity_instance, name: str):
+        self.name = name
+        self.storey = storey
+        placed = getattr(storey, "ObjectPlacement", None)
+        self.matrix = ifcopenshell.util.placement.get_local_placement(placed) if placed else np.eye(4)
+        self.level = _level(storey)
+
+    def to_world(self, m: np.ndarray) -> np.ndarray:
+        if self.name == "world":
+            return m
+        # The plan point's height is a world height (the storey's level plus an offset); in the storey's frame it is
+        # the offset alone, and the storey's matrix adds the level back (and any turn).
+        local = m.copy()
+        local[2, 3] -= self.level
+        return self.matrix @ local
+
+    def say(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"used": self.name}
+        origin = self.matrix[:3, 3]
+        turned = math.degrees(math.atan2(self.matrix[1][0], self.matrix[0][0]))
+        if self.name == "storey":
+            out["meaning"] = "[x, y] were read in the storey's own axes and carried into the world by its placement."
+        else:
+            out["meaning"] = "[x, y] were read in the model's world plan, as ifc_extent and ifc_info report it."
+        out["storey_placement"] = {"origin": [round(float(v), 6) for v in origin], "turned_degrees": round(turned, 6)}
+        if self.name == "world" and (abs(turned) > 1e-6 or abs(origin[0]) > 1e-9 or abs(origin[1]) > 1e-9):
+            out["note"] = 'This storey is turned or shifted in the world: frame "storey" reads [x, y] along its own axes.'
+        return out
+
+
 # ------------------------------------------------------------------ the model
 
 
@@ -126,9 +190,10 @@ def _level(storey: ifcopenshell.entity_instance) -> float:
     return float(ifcopenshell.util.placement.get_local_placement(storey.ObjectPlacement)[2][3])
 
 
-def _place(model, product, origin: tuple[float, float, float], x_axis: tuple[float, float], tilt: float = 0.0) -> None:
-    """Place `product` at `origin` (model units, world), its x along `x_axis` in plan, turned up by `tilt` radians
-    about that x. edit_object_placement makes the placement relative to the storey (or roof) it is in."""
+def _place(model, product, frame: Frame, origin: tuple[float, float, float], x_axis: tuple[float, float], tilt: float = 0.0) -> None:
+    """Place `product` at `origin` (model units: [x, y] in `frame`'s plan, z a world height), its x along `x_axis` in
+    that plan, turned up by `tilt` radians about that x. edit_object_placement takes the world matrix and makes the
+    placement relative to the storey (or roof) it is in."""
     ux, uy = x_axis
     c, s = math.cos(tilt), math.sin(tilt)
     m = np.eye(4)
@@ -137,7 +202,7 @@ def _place(model, product, origin: tuple[float, float, float], x_axis: tuple[flo
     m[:3, 1] = (-uy * c, ux * c, s)
     m[:3, 2] = (uy * s, -ux * s, c)
     m[:3, 3] = origin
-    ifcopenshell.api.run("geometry.edit_object_placement", model, product=product, matrix=m, is_si=False)
+    ifcopenshell.api.run("geometry.edit_object_placement", model, product=product, matrix=frame.to_world(m), is_si=False)
 
 
 def _link(model, product, realizes: str) -> dict[str, str] | None:
@@ -167,11 +232,12 @@ def _in_one_transaction(model: ifcopenshell.file, build):
     return out
 
 
-def _reply(model, element, storey, linked, shape: str) -> dict[str, Any]:
+def _reply(model, element, storey, linked, shape: str, frame: Frame) -> dict[str, Any]:
     unit = reading.units(model)["length"]
     return {
         "made": _made(element),
         "storey": {"id": storey.id(), "name": storey.Name, "level": round(_level(storey), 6)},
+        "frame": frame.say(),
         "realizes": linked,
         "shape": shape,
         "length_unit": unit.get("symbol") or unit.get("name"),
@@ -199,6 +265,7 @@ def add_wall(
     align: str = "centre",
     name: str = "",
     realizes: str = "",
+    frame: Any = "world",
 ) -> dict[str, Any]:
     """A wall along a baseline from `start` to `end`, standing on the storey's level (plus `base_offset`), `height`
     high (rising to `height_at_end` at the end, or to `peak_height` halfway), `thickness` thick, centred on the line
@@ -220,7 +287,9 @@ def add_wall(
         raise ValueError(f"align is centre, left or right (the side of the line the wall stands on, looking from start to end), not {align!r}.")
     if s == e:
         raise ValueError("The wall's start and end are the same point: give two points in plan.")
+    in_frame = _frame(frame)
     level = _storey(model, storey)
+    plan = Frame(level, in_frame)
     name, realizes = _text(name, "name"), _text(realizes, "realizes")
 
     dx, dy = e[0] - s[0], e[1] - s[1]
@@ -251,7 +320,7 @@ def add_wall(
         )
         ifcopenshell.api.run("geometry.assign_representation", model, product=wall, representation=rep)
         ifcopenshell.api.run("spatial.assign_container", model, products=[wall], relating_structure=level)
-        _place(model, wall, (s[0], s[1], _level(level) + lift), (dx / length, dy / length))
+        _place(model, wall, plan, (s[0], s[1], _level(level) + lift), (dx / length, dy / length))
         return wall, _link(model, wall, realizes)
 
     wall, linked = _in_one_transaction(model, build)
@@ -261,7 +330,7 @@ def add_wall(
         tops = f"{_say(h1)} high at its ends rising to {_say(hp)} in the middle"
     else:
         tops = f"{_say(h1)} high"
-    return _reply(model, wall, level, linked, f"a wall {_say(round(length, 6))} long, {_say(t)} thick, {tops}, {side} on its baseline")
+    return _reply(model, wall, level, linked, f"a wall {_say(round(length, 6))} long, {_say(t)} thick, {tops}, {side} on its baseline", plan)
 
 
 def add_slab(
@@ -273,6 +342,7 @@ def add_slab(
     kind: str = "floor",
     name: str = "",
     realizes: str = "",
+    frame: Any = "world",
 ) -> dict[str, Any]:
     """A slab over a footprint, its top at the storey's level (plus `top_offset`), `thickness` deep below it."""
     corners = _footprint(footprint)
@@ -281,7 +351,9 @@ def add_slab(
     what = (_text(kind, "kind") or "floor").lower()
     if what not in SLAB_KINDS:
         raise ValueError(f"kind is {' or '.join(SLAB_KINDS)}, not {kind!r} (a roof is ifc_add_roof's).")
+    in_frame = _frame(frame)
     level = _storey(model, storey)
+    plan = Frame(level, in_frame)
     name, realizes = _text(name, "name"), _text(realizes, "realizes")
     scale = ifcopenshell.util.unit.calculate_unit_scale(model)
     x0, y0 = corners[0]
@@ -292,12 +364,12 @@ def add_slab(
         rep = ifcopenshell.api.run("geometry.add_slab_representation", model, context=_body(model), depth=t * scale, direction_sense="NEGATIVE", polyline=local + [local[0]])
         ifcopenshell.api.run("geometry.assign_representation", model, product=slab, representation=rep)
         ifcopenshell.api.run("spatial.assign_container", model, products=[slab], relating_structure=level)
-        _place(model, slab, (x0, y0, _level(level) + raise_by), (1.0, 0.0))
+        _place(model, slab, plan, (x0, y0, _level(level) + raise_by), (1.0, 0.0))
         return slab, _link(model, slab, realizes)
 
     slab, linked = _in_one_transaction(model, build)
     area = Polygon(corners).area
-    return _reply(model, slab, level, linked, f"a {what} slab of {_say(round(area, 6))} square units in plan, {_say(t)} thick, its top {_say(raise_by)} above the storey's level")
+    return _reply(model, slab, level, linked, f"a {what} slab of {_say(round(area, 6))} square units in plan, {_say(t)} thick, its top {_say(raise_by)} above the storey's level", plan)
 
 
 def add_space(
@@ -309,13 +381,16 @@ def add_space(
     name: str = "",
     long_name: str = "",
     realizes: str = "",
+    frame: Any = "world",
 ) -> dict[str, Any]:
     """A room (IfcSpace) over a footprint, from the storey's level (plus `floor_offset`) up `height`, part of its
     storey as rooms are."""
     corners = _footprint(footprint)
     h = _number(height, "height", positive=True)
     lift = _number(floor_offset, "floor_offset")
+    in_frame = _frame(frame)
     level = _storey(model, storey)
+    plan = Frame(level, in_frame)
     name, long_name, realizes = _text(name, "name"), _text(long_name, "long_name"), _text(realizes, "realizes")
     scale = ifcopenshell.util.unit.calculate_unit_scale(model)
     x0, y0 = corners[0]
@@ -328,12 +403,12 @@ def add_space(
         rep = ifcopenshell.api.run("geometry.add_slab_representation", model, context=_body(model), depth=h * scale, polyline=local + [local[0]])
         ifcopenshell.api.run("geometry.assign_representation", model, product=space, representation=rep)
         ifcopenshell.api.run("aggregate.assign_object", model, products=[space], relating_object=level)
-        _place(model, space, (x0, y0, _level(level) + lift), (1.0, 0.0))
+        _place(model, space, plan, (x0, y0, _level(level) + lift), (1.0, 0.0))
         return space, _link(model, space, realizes)
 
     space, linked = _in_one_transaction(model, build)
     area = Polygon(corners).area
-    return _reply(model, space, level, linked, f"a room of {_say(round(area, 6))} square units in plan, {_say(h)} high")
+    return _reply(model, space, level, linked, f"a room of {_say(round(area, 6))} square units in plan, {_say(h)} high", plan)
 
 
 def add_roof(
@@ -347,6 +422,7 @@ def add_roof(
     overhang: Any = 0.0,
     name: str = "",
     realizes: str = "",
+    frame: Any = "world",
 ) -> dict[str, Any]:
     """A roof over a footprint (IfcRoof, contained in its storey, made of one or two sloped IfcSlab planes):
 
@@ -367,7 +443,9 @@ def add_roof(
         raise ValueError(f"slope is rise over run (0.25 for 3 in 12), at most {MAX_SLOPE:g}; {rise:g} is steeper than a roof plane.")
     t = _number(thickness, "thickness", positive=True)
     out_by = _number(overhang, "overhang", at_least_zero=True)
+    in_frame = _frame(frame)
     level = _storey(model, storey)
+    plan_frame = Frame(level, in_frame)
     name, realizes = _text(name, "name"), _text(realizes, "realizes")
     scale = ifcopenshell.util.unit.calculate_unit_scale(model)
     angle = math.atan(rise)
@@ -399,7 +477,7 @@ def add_roof(
         roof = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcRoof", name=name or None, predefined_type=ROOF_KINDS[what])
         ifcopenshell.api.run("spatial.assign_container", model, products=[roof], relating_structure=level)
         z0 = _level(level)
-        _place(model, roof, (ax, ay, z0), (ux, uy))
+        _place(model, roof, plan_frame, (ax, ay, z0), (ux, uy))
         made = []
         for i, (part, eave_at, way) in enumerate(planes):
             # The plane's own frame: its origin on its eave line (where the plan is lowest), x along the eave, y up
@@ -420,7 +498,7 @@ def add_roof(
             )
             ifcopenshell.api.run("geometry.assign_representation", model, product=plane, representation=rep)
             ifcopenshell.api.run("aggregate.assign_object", model, products=[plane], relating_object=roof)
-            _place(model, plane, (origin_x, origin_y, z), (ux * way, uy * way), tilt=angle)
+            _place(model, plane, plan_frame, (origin_x, origin_y, z), (ux * way, uy * way), tilt=angle)
             made.append(_made(plane))
         return roof, made, _link(model, roof, realizes)
 
@@ -431,6 +509,7 @@ def add_roof(
         level,
         linked,
         f"a {what} roof of {len(made)} plane(s), rising {_say(rise)} a unit across from its eave{'s' if what == 'gable' else ''} at {_say(eave)} above the storey's level, {_say(t)} thick, overhanging {_say(out_by)}",
+        plan_frame,
     )
     out["made"]["planes"] = made
     out["check"] = f"ifc_extent with element_id {made[0]['id']} (a plane) says where it reaches; ifc_validate checks the model."

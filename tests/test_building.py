@@ -20,12 +20,15 @@ import os
 import re
 import shlex
 import tempfile
+import time
 from pathlib import Path
 
 import anyio
 import ifcopenshell
 import ifcopenshell.util.classification
 import ifcopenshell.util.element
+import ifcopenshell.util.placement
+import numpy as np
 import pytest
 
 from flo2_ifc import building, geometry, reading
@@ -196,6 +199,92 @@ def test_a_gable_roof_has_two_planes_meeting_at_a_ridge_and_an_overhang():
     assert_valid(m)
 
 
+# ------------------------------------------------------------------ frames
+#
+# fact:building-steps-take-plan-points-in-world-coordinates-not-the-storeys-frame-2026-10-25: until 0.8.0 every step
+# read [x, y] in the model's WORLD frame, so a chat thinking in a turned building's own axes got every part turned
+# and shifted. dec:building-steps-take-a-frame-and-measures-cut-openings, part 1: each step takes `frame`, "storey"
+# (the plan points are in the storey's own axes: its placement turns and shifts them) or "world" (as ifc_extent and
+# ifc_info report them; the default, as before). models.turned_storey turns the site, or the building, by 26.03
+# degrees and shifts it to (10, 5), the storey 3 m up.
+
+
+def storey_matrix(model) -> np.ndarray:
+    storey = reading.find_storey(model, "L1")
+    return ifcopenshell.util.placement.get_local_placement(storey.ObjectPlacement)
+
+
+def bearing(matrix) -> float:
+    return math.degrees(math.atan2(matrix[1][0], matrix[0][0]))
+
+
+def reach_in_storey(model, element_id) -> tuple[np.ndarray, np.ndarray]:
+    """How far the element's shape reaches in the storey's own frame (metres): its lowest and highest corners."""
+    got, _ = geometry.meshes(model, [model.by_id(element_id)], time.monotonic() + 60)
+    corners = got[element_id].verts
+    local = (np.linalg.inv(storey_matrix(model)) @ np.c_[corners, np.ones(len(corners))].T).T[:, :3]
+    return local.min(axis=0), local.max(axis=0)
+
+
+@pytest.mark.parametrize("turn_at", ["site", "building"])
+def test_in_the_storeys_frame_every_step_builds_on_the_storeys_own_axes(turn_at):
+    m = models.turned_storey(turn_at)
+    frame = storey_matrix(m)
+    assert bearing(frame) == pytest.approx(models.TURN_DEGREES, abs=1e-6)
+    assert frame[:3, 3] == pytest.approx(models.TURN_ORIGIN, abs=1e-6)
+
+    wall = building.add_wall(m, storey="L1", start=[0, 0], end=[5, 0], height=3, thickness=0.2, frame="storey")
+    assert wall["frame"]["used"] == "storey"
+    lo, hi = reach_in_storey(m, wall["made"]["id"])
+    assert lo == pytest.approx([0, -0.1, 0], abs=1e-6) and hi == pytest.approx([5, 0.1, 3], abs=1e-6)
+    placed = ifcopenshell.util.placement.get_local_placement(m.by_id(wall["made"]["id"]).ObjectPlacement)
+    assert bearing(placed) == pytest.approx(models.TURN_DEGREES, abs=1e-6)
+
+    footprint = [[0, 0], [5, 0], [5, 4], [0, 4]]
+    slab = building.add_slab(m, storey="L1", footprint=footprint, thickness=0.2, frame="storey")
+    lo, hi = reach_in_storey(m, slab["made"]["id"])
+    assert lo == pytest.approx([0, 0, -0.2], abs=1e-6) and hi == pytest.approx([5, 4, 0], abs=1e-6)
+
+    room = building.add_space(m, storey="L1", footprint=footprint, height=2.7, frame="storey")
+    lo, hi = reach_in_storey(m, room["made"]["id"])
+    assert lo == pytest.approx([0, 0, 0], abs=1e-6) and hi == pytest.approx([5, 4, 2.7], abs=1e-6)
+
+    roof = building.add_roof(m, storey="L1", footprint=footprint, kind="shed", eave_height=3, slope=0.25, thickness=0.2, frame="storey")
+    assert roof["frame"]["used"] == "storey"
+    lo, hi = reach_in_storey(m, roof["made"]["planes"][0]["id"])
+    assert lo[:2] == pytest.approx([0, 0], abs=1e-4) and hi[:2] == pytest.approx([5, 4], abs=1e-4)
+    # The eave's underside is 3 m above the storey along the first side; it rises 0.25 a metre across 4 m.
+    assert lo[2] == pytest.approx(3, abs=1e-4)
+    assert hi[2] == pytest.approx(3 + 0.25 * 4 + 0.2 / math.cos(math.atan(0.25)), abs=1e-4)
+    for step in (wall, slab, room):
+        assert step["frame"]["used"] == "storey"
+    assert_valid(m)
+
+
+def test_in_the_world_frame_the_default_points_are_where_ifc_extent_reports_them():
+    m = models.turned_storey("building")
+    frame = storey_matrix(m)
+    # The storey's own [0, 0] and [5, 0], given in world: the wall lands on the storey's axes, as before 0.8.0.
+    a, b = frame @ [0, 0, 0, 1], frame @ [5, 0, 0, 1]
+    given = building.add_wall(m, storey="L1", start=a[:2].tolist(), end=b[:2].tolist(), height=3, thickness=0.2)
+    assert given["frame"]["used"] == "world"
+    lo, hi = reach_in_storey(m, given["made"]["id"])
+    assert lo == pytest.approx([0, -0.1, 0], abs=1e-6) and hi == pytest.approx([5, 0.1, 3], abs=1e-6)
+    # [0, 0] -> [5, 0] in world runs along world x, whatever way the storey is turned; heights stay the storey's.
+    plain = building.add_wall(m, storey="L1", start=[0, 0], end=[5, 0], height=3, thickness=0.2, frame="world")
+    assert box(m, plain["made"]["id"])["min"] == pytest.approx([0, -0.1, 3], abs=1e-6)
+    assert box(m, plain["made"]["id"])["max"] == pytest.approx([5, 0.1, 6], abs=1e-6)
+    assert_valid(m)
+
+
+def test_on_an_unturned_storey_both_frames_build_the_same():
+    m = feet_model()
+    one = building.add_wall(m, storey="Level 2", start=[0, 0], end=[30, 0], height=10, thickness=0.5, frame="storey")
+    two = building.add_wall(m, storey="Level 2", start=[0, 0], end=[30, 0], height=10, thickness=0.5, frame="world")
+    assert box(m, one["made"]["id"])["min"] == pytest.approx(box(m, two["made"]["id"])["min"], abs=1e-6)
+    assert box(m, one["made"]["id"])["max"] == pytest.approx(box(m, two["made"]["id"])["max"], abs=1e-6)
+
+
 # ---------------------------------------------------------------- refusals
 
 
@@ -218,6 +307,10 @@ def test_a_gable_roof_has_two_planes_meeting_at_a_ridge_and_an_overhang():
         ("add_roof", {"storey": "Level 1", "footprint": [[0, 0], [1, 0], [1, 1], [0, 1]], "kind": "hip", "eave_height": 3, "slope": 0.3, "thickness": 0.2}, "shed or gable"),
         ("add_roof", {"storey": "Level 1", "footprint": [[0, 0], [1, 0], [1, 1], [0, 1]], "kind": "shed", "eave_height": 3, "slope": 0, "thickness": 0.2}, "slope"),
         ("add_roof", {"storey": "Level 1", "footprint": [[0, 0], [1, 0], [1, 1], [0, 1]], "kind": "shed", "eave_height": 3, "slope": 0.3, "thickness": 0.2, "overhang": -1}, "overhang"),
+        ("add_wall", {"storey": "Level 1", "start": [0, 0], "end": [1, 0], "height": 3, "thickness": 0.2, "frame": "plan"}, "frame is"),
+        ("add_slab", {"storey": "Level 1", "footprint": [[0, 0], [1, 0], [1, 1]], "thickness": 0.5, "frame": "local"}, "frame is"),
+        ("add_space", {"storey": "Level 1", "footprint": [[0, 0], [1, 0], [1, 1]], "height": 2, "frame": 1}, "frame"),
+        ("add_roof", {"storey": "Level 1", "footprint": [[0, 0], [1, 0], [1, 1], [0, 1]], "kind": "shed", "eave_height": 3, "slope": 0.3, "thickness": 0.2, "frame": "site"}, "frame is"),
     ],
 )
 def test_wrong_input_is_refused_with_its_reason_and_changes_nothing(step, kwargs, says):

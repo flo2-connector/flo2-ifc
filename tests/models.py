@@ -192,3 +192,89 @@ def rooms_on_a_floor(rooms: list[tuple[str, tuple[float, float, float, float]]],
         run("geometry.assign_representation", f, product=space, representation=rep)
         _place(f, space, x=x0, y=y0, z=0.0)
     return f
+
+
+#: A turned and shifted building (turned_storey): its plan is turned this many degrees about the vertical, its
+#: origin is at TURN_ORIGIN (metres, world), and its storey "L1" stands TURN_ORIGIN's z above it.
+TURN_DEGREES = 26.03
+TURN_ORIGIN = (10.0, 5.0, 3.0)
+
+
+def _turned(degrees: float, x: float, y: float, z: float) -> np.ndarray:
+    m = np.eye(4)
+    c, s = np.cos(np.radians(degrees)), np.sin(np.radians(degrees))
+    m[:2, :2] = [[c, -s], [s, c]]
+    m[:3, 3] = (x, y, z)
+    return m
+
+
+def turned_storey(turn_at: str = "site", schema: str = "IFC4") -> ifcopenshell.file:
+    """A model in metres whose storey "L1" is turned TURN_DEGREES and shifted to TURN_ORIGIN in world: the turn is in
+    the site's placement (`turn_at="site"`) or in the building's (`"building"`), as a model drawn square to its own
+    walls and set on its plot is (fact:building-steps-take-plan-points-in-world-coordinates-not-the-storeys-frame-
+    2026-10-25). Each placement is given as its WORLD matrix: edit_object_placement makes it relative to its parent."""
+    if turn_at not in ("site", "building"):
+        raise ValueError(turn_at)
+    run = ifcopenshell.api.run
+    f = run("project.create_file", version=schema)
+    project = run("root.create_entity", f, ifc_class="IfcProject", name="Turned")
+    run("unit.assign_unit", f, units=[run("unit.add_si_unit", f, unit_type="LENGTHUNIT")])
+    model3d = run("context.add_context", f, context_type="Model")
+    run("context.add_context", f, context_type="Model", context_identifier="Body", target_view="MODEL_VIEW", parent=model3d)
+    site = run("root.create_entity", f, ifc_class="IfcSite", name="Site")
+    bldg = run("root.create_entity", f, ifc_class="IfcBuilding", name="Building")
+    storey = run("root.create_entity", f, ifc_class="IfcBuildingStorey", name="L1")
+    storey.Elevation = TURN_ORIGIN[2]
+    run("aggregate.assign_object", f, relating_object=project, products=[site])
+    run("aggregate.assign_object", f, relating_object=site, products=[bldg])
+    run("aggregate.assign_object", f, relating_object=bldg, products=[storey])
+    x, y, z = TURN_ORIGIN
+    at_site = _turned(TURN_DEGREES if turn_at == "site" else 0.0, x, y, 0.0)
+    at_building = _turned(TURN_DEGREES, x, y, 0.0)
+    run("geometry.edit_object_placement", f, product=site, matrix=at_site)
+    run("geometry.edit_object_placement", f, product=bldg, matrix=at_building.copy())
+    run("geometry.edit_object_placement", f, product=storey, matrix=_turned(TURN_DEGREES, x, y, z))
+    return f
+
+
+#: wall_with_a_door's sizes, in metres: a wall 5 long, 3 high, 0.2 thick along x from the origin, centred on y = 0;
+#: an opening 0.9 wide and 2.1 high through it, 2 m from its start; a door 0.05 thick filling it.
+DOOR = {"wall": (5.0, 3.0, 0.2), "opening_at": 2.0, "opening": (0.9, 2.1), "door_thickness": 0.05}
+
+
+def wall_with_a_door(schema: str = "IFC4") -> ifcopenshell.file:
+    """One storey "L1" (metres) holding one wall with an opening cut in it (feature.add_feature) and a door filling
+    the opening (feature.add_filling), made the way the skill's recipe makes them
+    (fact:measures-and-drawings-skip-opening-subtraction-so-a-cut-wall-reads-whole-2026-10-25). The wall's volume
+    with its opening cut is 5 x 3 x 0.2 - 0.9 x 2.1 x 0.2 = 2.622 m3."""
+    run = ifcopenshell.api.run
+    f = run("project.create_file", version=schema)
+    project = run("root.create_entity", f, ifc_class="IfcProject", name="Door")
+    run("unit.assign_unit", f, units=[run("unit.add_si_unit", f, unit_type="LENGTHUNIT")])
+    model3d = run("context.add_context", f, context_type="Model")
+    body = run("context.add_context", f, context_type="Model", context_identifier="Body", target_view="MODEL_VIEW", parent=model3d)
+    site = run("root.create_entity", f, ifc_class="IfcSite", name="Site")
+    bldg = run("root.create_entity", f, ifc_class="IfcBuilding", name="Building")
+    storey = run("root.create_entity", f, ifc_class="IfcBuildingStorey", name="L1")
+    storey.Elevation = 0.0
+    run("aggregate.assign_object", f, relating_object=project, products=[site])
+    run("aggregate.assign_object", f, relating_object=site, products=[bldg])
+    run("aggregate.assign_object", f, relating_object=bldg, products=[storey])
+    for p in (site, bldg, storey):
+        _place(f, p)
+    length, height, thick = DOOR["wall"]
+    wall = run("root.create_entity", f, ifc_class="IfcWall", name="Wall")
+    run("geometry.assign_representation", f, product=wall, representation=run("geometry.add_wall_representation", f, context=body, length=length, height=height, thickness=thick))
+    _place(f, wall, y=-thick / 2)
+    run("spatial.assign_container", f, relating_structure=storey, products=[wall])
+    width, high = DOOR["opening"]
+    opening = run("root.create_entity", f, ifc_class="IfcOpeningElement", name="Opening")
+    run("geometry.assign_representation", f, product=opening, representation=run("geometry.add_wall_representation", f, context=body, length=width, height=high, thickness=2 * thick))
+    _place(f, opening, x=DOOR["opening_at"], y=-thick)
+    run("feature.add_feature", f, feature=opening, element=wall)
+    door = run("root.create_entity", f, ifc_class="IfcDoor", name="Door")
+    run("geometry.assign_representation", f, product=door, representation=run("geometry.add_wall_representation", f, context=body, length=width, height=high, thickness=DOOR["door_thickness"]))
+    _place(f, door, x=DOOR["opening_at"], y=-DOOR["door_thickness"] / 2)
+    run("feature.add_filling", f, opening=opening, element=door)
+    run("spatial.assign_container", f, relating_structure=storey, products=[door])
+    return f

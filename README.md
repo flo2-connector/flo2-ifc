@@ -109,6 +109,28 @@ labelled with the area measured from its outline. The reply's `room_areas` says,
 (`AREA_DIFFERS`) it names the room and both numbers in `notes`: an authoring tool measures a room to its own rules
 (to a wall's finish face or its centre, with or without a column), and the difference is a fact about the model.
 
+**Openings are cut (since 0.8.0).** The meshes the measures and drawings read are made with IfcOpenShell's opening
+subtraction ON (`geometry.mesh_settings`), so a wall is measured and drawn as built: a 5 x 3 x 0.2 m wall with a
+0.9 x 2.1 m opening holds 2.622 m3, a section through its door cuts the wall only above the opening, and an elevation
+shows the door. Until 0.8.0 they shared `ifc_extent`'s setting, which skips the subtraction because an opening cannot
+widen a box, on the premise that a Revit export's meshes come already cut; that premise was false for an opening made
+in the model (the skill's recipe, `feature.add_feature`) and, measured on 2026-10-25, for both public samples too:
+their walls' volume fell from 64.78 to 54.50 m3 (AC20-FZK-Haus, 13 walls, 17 openings) and from 240.61 to 207.92 m3
+(the Duplex, 57 walls, 50 openings) once their openings were cut (flo2-ifc's design 1510fc3728665dbf,
+`fact:measures-and-drawings-skip-opening-subtraction-so-a-cut-wall-reads-whole-2026-10-25`,
+`dec:building-steps-take-a-frame-and-measures-cut-openings`). `ifc_extent`'s boxes keep the fast setting. A mesh is
+kept under the setting it was made with. What it costs, cold (no kept meshes), one CPU (an i5-10300H core), in
+seconds before and after:
+
+| Model | `ifc_volume` of every wall | the ground storey's plan | a section through a door |
+|---|---|---|---|
+| AC20-FZK-Haus (2.6 MB) | 0.13 to 1.92 | 0.49 to 0.77 | 0.57 to 2.35 |
+| Duplex (2.4 MB) | 0.15 to 0.44 | 0.31 to 0.31 | 0.90 to 1.43 |
+
+Cutting is slower (15 times for FZK-Haus's walls' volume, 4 times for its section), and still a few seconds a call; once made, a mesh is kept, so the next measure or drawing of the same elements pays
+nothing. The geometry library stays `hybrid-cgal-simple-opencascade`: with openings cut, `opencascade`, `cgal` and
+`hybrid-opencascade-cgal` took as long for the volume and 1.6 to 1.8 times as long for the drawings.
+
 **The meshes are kept** for the session (`FLO2_IFC_MESH_CACHE_MB`, 256 MB; a large building model's all fit
 in it), so a second drawing or measure of the same elements does not make them again, and they are forgotten whenever
 the session's model changes (an edit, a shape, a reload: `server._watch_changes`). A drawing that runs out of
@@ -202,6 +224,17 @@ gives; heights are above the storey's level. Each step takes an optional `name`,
 part the element realizes (for example `cmp:north-wall`), kept as an `IfcClassificationReference` with that
 identification in the classification "flo2 design". A shed roof's low eave runs along the footprint's first side (its
 first two corners); a gable's ridge runs parallel to it, halfway across.
+
+**The frame (since 0.8.0).** Each step takes `frame`. `"world"` (the default, and before 0.8.0 the only frame) reads
+`[x, y]` in the model's world plan, the numbers `ifc_extent` and `ifc_info` report. `"storey"` reads them in the
+storey's own axes: its placement (its turn about the vertical and its offset, through its site and building) carries
+them into the world, so a building turned on its plot is built from the plan's own dimensions. Heights are above the
+storey's level in both. The reply's `frame` says which was used and the storey's origin and turn, and notes when a
+world-frame call was made on a turned or shifted storey. Until 0.8.0 the steps' texts said only "[x, y] in plan", and
+a chat thinking in a turned building's axes had every part turned and shifted (flo2-ifc's design 1510fc3728665dbf,
+`fact:building-steps-take-plan-points-in-world-coordinates-not-the-storeys-frame-2026-10-25`). `"storey"` becomes
+the default only after a release that says so first. `tests/test_building.py` builds every step on a storey turned
+26.03 degrees and shifted to (10, 5), the turn in the site's placement and, separately, in the building's.
 
 Inside, each step uses IfcOpenShell's own api: `root.create_entity`; `geometry.add_wall_representation` (with
 `Clipping` planes for a sloped or peaked top) or `geometry.add_slab_representation` (with its `x_angle` for a roof
@@ -363,7 +396,7 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 ## The tests and the checks
 
-`python -m pytest` runs thirteen test files:
+`python -m pytest` runs fourteen test files:
 
 - `tests/test_skill.py` holds the skill read-a-building-model to its shape: each file at most 16,000 bytes (flo2
   serves each in one reply of at most 30,000 characters), SKILL.md naming every page beside it and no other, and
@@ -379,7 +412,7 @@ uv venv -p 3.12 && uv pip install '.[test]'
     (a footprint, a volume, and a plan rendered to PNG, which checks the image's cairo library and fonts); an IDS is
     written and the house checked against it (one specification passes, one fails, both reports are written), an
     empty IDS is refused, and buildingSMART's critical and informal-proposition rules run on it; and a wall is built
-    on it in one call (`ifc_add_wall`); and it is rendered in 3D (`ifc_render`), which checks the image's off-screen
+    on it in one call (`ifc_add_wall`), in each frame; and it is rendered in 3D (`ifc_render`), which checks the image's off-screen
     OpenGL.
 - `tests/test_tool_list.py` starts it the same way and compares what it lists with flo2-ifc 0.3.1's list
   (`tests/tools-0.3.1.json`, read from 0.3.1 over stdio): the server's name and instructions, 0.3.1's 31 tools in
@@ -394,6 +427,10 @@ uv venv -p 3.12 && uv pip install '.[test]'
   sizes are known (`models.measured_site()`): a slab over a footing counted once, an open mesh refused a volume, the
   clear distance between two walls, a plan to a scale measured off the SVG, sections along a line, a grid line and
   through named elements, an elevation, and a region.
+- `tests/test_openings.py` (since 0.8.0) measures and draws a wall with an opening and a door in it
+  (`models.wall_with_a_door()`): its volume less the opening (2.622 m3), a section through the door that cuts the
+  wall only above the opening, an elevation that shows the door, a plan cut that shows the gap, and a mesh kept per
+  setting.
 - `tests/test_reading.py` tests each reader on synthetic models, at sizes that pass a reply's budget (400 walls on
   one storey), and with a time limit of zero so a partial answer is tested too. No real person's model is ever a
   fixture.
