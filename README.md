@@ -75,6 +75,16 @@ is an `express::entity`, which IfcOpenShell's SWIG wrapper does not wrap), and w
 nothing on a storey with no elevation. flo2-ifc installs ifcopenshell 0.9.0 from PyPI, so a fix in the fork would not
 reach it; the fix is offered upstream on its own. `ifc_plot` and `ifc_render` stay in the server unchanged.
 
+**A 3D picture (since 0.7.0).** `ifc_render`, ifcmcp's own tool (ifcquery's render module), draws the model's shapes
+with pyvista on VTK in an off-screen window and returns a 1280 x 960 PNG, and writes it where `output_path` says. Until
+0.6.0 the image left pyvista out, so the tool was listed and failed. flo2's door now offers it through its own step,
+which has it write into the session's outbox and keeps the picture in the design. The image draws with no display:
+VTK's Linux wheel looks for its OpenGL at run time, and the image installs Mesa's EGL and llvmpipe (`libegl1`,
+`libegl-mesa0`, `libgl1-mesa-dri`, `libgl1`) and names VTK's EGL window (`VTK_DEFAULT_OPENGL_WINDOW`), so it draws on
+the CPU on Mesa's surfaceless platform. One thing in flo2-ifc's own server had to change for it: mcp 2.x's
+`ImageContent` is left set in ifcmcp's server module after its tools are read, because the image tools look it up when
+called (until 0.7.0 both failed with "'NoneType' object is not callable" after drawing).
+
 **How it draws.** What a plane cuts is joined into rings and filled dark; what lies beyond the cut (below it, in a
 plan) is each element's triangles projected, snapped to a tenth of a millimetre of paper and joined, drawn white with
 a thin line, farthest first so nearer ones cover them. Snapping loses nothing the sheet can show and joins a detailed
@@ -267,6 +277,7 @@ Every dependency is pinned exactly in `pyproject.toml`. That list is the set flo
 | `networkx==3.7` | Without it, `ifcedit list` prints a "Note: API not available" line to stdout ahead of its JSON. |
 | `pytest==9.1.1` | `ifc_validate`'s `express_rules` runs IfcOpenShell's rule executor, which imports pytest's assertion rewriting (`ifcopenshell/express/rule_executor.py`). Without it that check fails with "No module named '_pytest'". The tests use it too. |
 | `shapely==2.2.0` | flo2-ifc's footprints and drawings join projected triangles with it. ifcopenshell 0.9.0 requires it, unpinned; flo2-ifc imports it itself, so it is pinned at the version that resolves. |
+| `pyvista==0.49.1`, `vtk==9.7.1` | `ifc_render` (since 0.7.0). ifcquery imports pyvista if it can and fails the tool otherwise; pyvista draws with VTK, which decides how a picture is drawn with no display. Their own dependencies (matplotlib, pillow, pooch, scooby, cyclopts) are transitive. They take the image from 660 MB to 1.55 GB (VTK's libraries are 565 MB, Mesa's LLVM 124 MB). |
 | `cairosvg==2.9.1` | `ifc_draw` renders its SVG to PNG with it. It loads the cairo library at run time: the image installs Debian's `libcairo2`, and `fonts-dejavu-core` for the words. Its own dependencies (cairocffi, cssselect2, tinycss2, defusedxml, pillow) are transitive. |
 | `ifctester==0.9.0` | `ifc_check_ids` and `ifc_write_ids`: IfcOpenShell's own IDS checker, reporters and IDS API, with the IDS 1.0 XSD. The image removes its browser web app (`ifctester/webapp/www`, 32 MB), which nothing here serves. |
 | `xmlschema==4.3.2`, `elementpath==5.1.4` | ifctester leaves them unpinned, and they decide what an IDS says and matches: xmlschema reads an IDS and checks it against the XSD (offline: it carries the W3C schemas the XSD imports), and elementpath turns an IDS pattern into the regular expression a value is matched with. |
@@ -278,8 +289,6 @@ Every dependency is pinned exactly in `pyproject.toml`. That list is the set flo
 
 Some things are deliberately left out:
 
-- **pyvista.** It is 900 MB, and only `ifc_render` needs it. flo2's door does not offer that tool. Without pyvista, the
-  tool is still listed, but calling it fails.
 - **ifctester's other helpers** (flask, bcf-client, odfpy, pystache, python-dateutil). ifctester requires them, so
   they are installed, unpinned: they serve its web app and its BCF, ODS and HTML reports, and decide nothing a check
   says. **bcf-client is GPL-3.0**; flo2-ifc's own code never imports it.
@@ -300,7 +309,9 @@ So the image needs no network and no writable root at run time:
 
 - `HOME` is `/tmp`;
 - no bytecode is written;
-- the build checks `flo2-ifc --version` and `ifcmcp --version`;
+- the build checks `flo2-ifc --version` and `ifcmcp --version`, and that pyvista draws with no display;
+- VTK draws with Mesa's EGL on the CPU (`VTK_DEFAULT_OPENGL_WINDOW=vtkEGLRenderWindow`, `EGL_PLATFORM=surfaceless`),
+  Mesa's shader cache is off, and matplotlib's font cache goes to `/tmp` (`MPLCONFIGDIR`);
 - the entry point is `flo2-ifc` on stdio (it was `ifcmcp` until 0.2.0).
 
 flo2 builds its image from this repository's `Dockerfile` at one pinned commit of this repository
@@ -350,7 +361,7 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 ## The tests and the checks
 
-`python -m pytest` runs eleven test files:
+`python -m pytest` runs twelve test files:
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp 2.3.0 client. It checks that:
   - the server initializes as `ifc-mcp`, with instructions;
@@ -362,13 +373,17 @@ uv venv -p 3.12 && uv pip install '.[test]'
     (a footprint, a volume, and a plan rendered to PNG, which checks the image's cairo library and fonts); an IDS is
     written and the house checked against it (one specification passes, one fails, both reports are written), an
     empty IDS is refused, and buildingSMART's critical and informal-proposition rules run on it; and a wall is built
-    on it in one call (`ifc_add_wall`).
+    on it in one call (`ifc_add_wall`); and it is rendered in 3D (`ifc_render`), which checks the image's off-screen
+    OpenGL.
 - `tests/test_tool_list.py` starts it the same way and compares what it lists with flo2-ifc 0.3.1's list
   (`tests/tools-0.3.1.json`, read from 0.3.1 over stdio): the server's name and instructions, 0.3.1's 31 tools in
   order (and only the three checks and the four building steps added since),
   each one's input and output schemas, its description (by sha256, so ifcmcp's LGPL text is not copied here), and the
   reason each of ten failing ifcmcp calls gives. A difference means the tools changed, and flo2's real-ifcmcp door
   test must change with them.
+- `tests/test_rendering.py` renders the synthetic house in 3D with `ifc_render`, in a child with no display: a
+  1280 x 960 PNG on a white ground with shaded faces, a different picture from each side, a selector, and an element
+  picked out.
 - `tests/test_measuring.py` and `tests/test_drawing.py` test the measures and the drawings on a synthetic model whose
   sizes are known (`models.measured_site()`): a slab over a footing counted once, an open mesh refused a volume, the
   clear distance between two walls, a plan to a scale measured off the SVG, sections along a line, a grid line and

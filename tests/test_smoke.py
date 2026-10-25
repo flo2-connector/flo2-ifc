@@ -164,6 +164,9 @@ async def round_trip() -> dict:
             # A building step: one call makes a wall on the house's ground floor, in its millimetres.
             out["wall"] = json.loads(text_of(await session.call_tool("ifc_add_wall", {"storey": "GROUND", "start": [0, 5000], "end": [3000, 5000], "height": 2700, "thickness": 100, "realizes": "cmp:smoke-wall"})))
             out["wall_extent"] = json.loads(text_of(await session.call_tool("ifc_extent", {"element_id": out["wall"]["made"]["id"]})))
+            # ifcmcp's 3D picture (since 0.7.0), written where the confined image can write.
+            rendered = await session.call_tool("ifc_render", {"view": "iso", "output_path": f"{tempfile.gettempdir()}/flo2-ifc-smoke-render.png"})
+            out["render"] = (rendered.is_error, [(b.type, getattr(b, "mime_type", None), getattr(b, "data", None) or getattr(b, "text", "")) for b in rendered.content])
     return out
 
 
@@ -272,6 +275,22 @@ def test_a_wall_is_built_in_one_call_through_the_server(served):
     assert wall["realizes"] == {"identification": "cmp:smoke-wall", "classification": "flo2 design"}
     box = served["wall_extent"]["overall"]
     assert box["min"] == pytest.approx([0, 4950, 0], abs=0.01) and box["max"] == pytest.approx([3000, 5050, 2700], abs=0.01)
+
+
+def test_the_house_is_rendered_in_3d_through_the_server(served):
+    # ifc_render needs pyvista and a renderer that draws with no display.
+    import base64
+    import io
+
+    from PIL import Image
+
+    is_error, blocks = served["render"]
+    assert not is_error, blocks
+    images = [data for kind, mime, data in blocks if kind == "image" and mime == "image/png"]
+    assert len(images) == 1, [(k, m, str(d)[:200]) for k, m, d in blocks]
+    img = Image.open(io.BytesIO(base64.b64decode(images[0]))).convert("RGB")
+    assert img.size == (1280, 960)
+    assert sum(1 for p in img.getdata() if p != (255, 255, 255)) > 20_000
 
 
 def test_version_is_one_line_naming_what_runs():

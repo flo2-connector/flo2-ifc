@@ -2,7 +2,30 @@
 
 flo2-ifc's versions, newest first. Versions before 0.3.1 are described in README.md, in the sections marked "since".
 
-## 0.6.0 (unreleased)
+## 0.7.0 (unreleased)
+
+No tool is added or removed, and every tool's name, arguments and description are 0.6.0's; `ifc_render`, listed and
+failing until now, draws. It adds two pins and 890 MB to the image, so this is a minor release.
+
+- **`ifc_render` draws a 3D picture, with no display** (flo2's design 1a97fc1f1de4d5d2,
+  `dec:a-chat-renders-a-building-model-in-3d`; flo2's door offers it through its own step, which keeps the PNG in the
+  design). New pins: `pyvista==0.49.1` and `vtk==9.7.1`. The image installs Mesa's EGL and llvmpipe (`libegl1`,
+  `libegl-mesa0`, `libgl1-mesa-dri`, `libgl1`) and names VTK's EGL window, so VTK draws on the CPU on Mesa's
+  surfaceless platform under flo2's flags (no network, a read-only root, user 65534). The build checks that pyvista
+  draws; the smoke test renders the synthetic house through the confined image; `tests/test_rendering.py` renders it
+  with no display from each side, with a selector and with an element picked out.
+- **Fixed: ifcmcp's image tools failed after drawing.** flo2-ifc read ifcmcp's tools with mcp 2.x's `ImageContent`
+  set in ifcmcp's server module, then put it back to None; `ifc_render` and `ifc_plot` look it up when called, so
+  both failed with "'NoneType' object is not callable" once they had drawn. It is now left set.
+- **The image is 1.55 GB** (0.6.0: 660 MB): VTK's libraries 565 MB, Mesa's LLVM 124 MB, matplotlib 34 MB.
+- **`tools/measure.py`**: a session's peak memory while it renders (memory.peak, and the anonymous peak sampled from
+  memory.stat), in flo2's container shape, for the broker's cap. Measured on 2026-10-25 under a 1 GiB cap, one CPU,
+  a session opening a model and rendering it five times (iso, top, south, the built elements only, one wall picked
+  out): bhome's model (14 KB) 323.9 to 425.2 MiB, the public AC20-FZK-Haus sample (2.6 MB) 545.9 to 589.8 MiB, the
+  public Duplex sample (2.4 MB) 470.2 to 507.7 MiB; no memory event and no kill. A render of either sample took 23 to
+  29 s at one CPU (Intel N95).
+
+## 0.6.0
 
 Four tools are added, so this is a minor release. Every tool 0.5.1 served is unchanged.
 

@@ -15,8 +15,7 @@
 # 0.9.0 the base-quantities rule measures a room modelled as a plain box, with
 # 0.8.5 it silently skips it (measured on the droplet, 2026-10-02). networkx
 # is pinned because without it `ifcedit list` prints a note to stdout ahead of
-# its JSON. No pyvista (900 MB; only ifc_render, which flo2's door does not
-# offer, needs it).
+# its JSON. Since 0.7.0, pyvista and VTK, for ifc_render (below).
 #
 # TWO STAGES. The build stage installs the package from its source; the image
 # gets only the finished environment, copied to the same path on the same
@@ -50,12 +49,26 @@ FROM python:3.12-slim
 # library at run time (cairocffi), and writes its words in DejaVu Sans. Both
 # come from Debian, installed here and nowhere else; fontconfig's cache is
 # built at install, so nothing is written to the read-only root at run time.
+#
+# ifc_render (since 0.7.0; flo2's design 1a97fc1f1de4d5d2,
+# dec:a-chat-renders-a-building-model-in-3d) draws with pyvista on VTK, in an
+# off-screen window. There is no display here, and VTK's Linux wheel finds its
+# OpenGL at run time: X first (none here, so it says so on stderr and moves
+# on), then EGL. Mesa's EGL gives it a "surfaceless" platform drawn by
+# llvmpipe on the CPU: libegl1 (the EGL loader), libegl-mesa0 (Mesa's EGL)
+# and libgl1-mesa-dri (llvmpipe), and libgl1 for the GL entry points VTK's
+# loader opens beside EGL's. VTK_DEFAULT_OPENGL_WINDOW names the EGL window
+# outright, so no X library is ever asked for. Mesa's shader cache is off:
+# the root is read-only and /tmp is small.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends libcairo2 fonts-dejavu-core \
+      libegl1 libegl-mesa0 libgl1-mesa-dri libgl1 \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /opt/flo2-ifc /opt/flo2-ifc
 COPY --from=build /opt/ifc-gherkin-rules /opt/ifc-gherkin-rules
-ENV PATH=/opt/flo2-ifc/bin:$PATH HOME=/tmp PYTHONDONTWRITEBYTECODE=1 FLO2_IFC_RULES_DIR=/opt/ifc-gherkin-rules
+ENV PATH=/opt/flo2-ifc/bin:$PATH HOME=/tmp PYTHONDONTWRITEBYTECODE=1 FLO2_IFC_RULES_DIR=/opt/ifc-gherkin-rules \
+    VTK_DEFAULT_OPENGL_WINDOW=vtkEGLRenderWindow EGL_PLATFORM=surfaceless MESA_SHADER_CACHE_DISABLE=true \
+    MPLCONFIGDIR=/tmp/matplotlib
 # The entry point is flo2-ifc: its own server on mcp 2.x with every one of
 # ifcmcp's tools, the readers in front of seven of them and two added (since
 # flo2-ifc 0.2.0), the measures and the drawing (since 0.3.0), and the IDS
@@ -64,7 +77,8 @@ ENV PATH=/opt/flo2-ifc/bin:$PATH HOME=/tmp PYTHONDONTWRITEBYTECODE=1 FLO2_IFC_RU
 # --version and does not serve.
 RUN flo2-ifc --version && ifcmcp --version \
  && python -c "from ifctester import ids; ids.get_schema(); from flo2_ifc import rules; n = len(rules.rules_for(None)); assert n > 90, n; print('IDS 1.0 schema loaded;', n, 'of buildingSMART\'s rules', rules.release()['rules']['tag'])" \
- && python -c "import cairosvg; assert cairosvg.svg2png(bytestring=b'<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\"><text y=\"3\">a</text></svg>')[:4] == b'\x89PNG'"
+ && python -c "import cairosvg; assert cairosvg.svg2png(bytestring=b'<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\"><text y=\"3\">a</text></svg>')[:4] == b'\x89PNG'" \
+ && python -c "import pyvista as pv; p = pv.Plotter(off_screen=True, window_size=(64, 48)); p.add_mesh(pv.Cube(), color='red'); img = p.screenshot(return_img=True); said = p.ren_win.ReportCapabilities(); p.close(); assert img.shape == (48, 64, 3) and (img[..., 0] > 128).sum() > 100, img.shape; print('pyvista draws with no display:', [l.strip() for l in said.splitlines() if 'renderer string' in l])"
 USER 65534:65534
 WORKDIR /tmp
 ENTRYPOINT ["flo2-ifc"]

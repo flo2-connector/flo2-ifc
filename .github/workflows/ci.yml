@@ -48,7 +48,8 @@ jobs:
       # ifc_summary, a synthetic millimetre house opened from /design and read
       # with the paged readers, its extent and its validation, then measured and
       # drawn to a PNG inside the image's /tmp, an IDS written and checked, and
-      # buildingSMART's rules run, and a wall built in one call), and the tool list compared
+      # buildingSMART's rules run, a wall built in one call, and the house
+      # rendered in 3D with no display), and the tool list compared
       # with flo2-ifc 0.3.1's (tests/test_tool_list.py), asked of the
       # image under flo2-tool-sandbox's flags, with a folder mounted read-only
       # at /design, as flo2 mounts a design's.
@@ -60,7 +61,7 @@ jobs:
           FLO2_IFC_DESIGN_SEEN_AS: /design
           FLO2_IFC_SERVER: >-
             docker run --rm -i --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m
-            --memory 1g --memory-swap 1g --cpus 1 --pids-limit 64
+            --memory 1152m --memory-swap 1152m --cpus 1 --pids-limit 64
             --cap-drop ALL --security-opt no-new-privileges --user 65534:65534
             --mount type=bind,source=${{ runner.temp }}/design,target=/design,readonly
             flo2-ifc:ci
