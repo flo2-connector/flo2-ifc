@@ -582,8 +582,8 @@ def build_server() -> Any:
         end: list[float],
         height: float,
         thickness: float,
-        height_at_end: float | None = None,
-        peak_height: float | None = None,
+        height_at_end: float = 0.0,
+        peak_height: float = 0.0,
         base_offset: float = 0.0,
         align: str = "centre",
         name: str = "",
@@ -603,8 +603,10 @@ def build_server() -> Any:
         :param end: Where its baseline ends, [x, y].
         :param height: Its height (at its start, when its top slopes).
         :param thickness: Its thickness.
-        :param height_at_end: Optional: its height at its end, for a sloped top.
-        :param peak_height: Optional: its height in the middle, for a gable end.
+        :param height_at_end: Optional: its height at its end, for a sloped top
+            (0 or left out: a level top).
+        :param peak_height: Optional: its height in the middle, for a gable end
+            (0 or left out: none).
         :param base_offset: Optional: how far above the storey's level its bottom is (default 0).
         :param align: Optional: "centre" (default) on the baseline, or "left" or
             "right" of it, looking from start to end.
@@ -612,7 +614,8 @@ def build_server() -> Any:
         :param realizes: Optional: the id of the design part it realizes, e.g.
             "cmp:north-wall"; kept as a reference in the classification "flo2 design".
         """
-        return built(building.add_wall(model(), storey, start, end, height, thickness, height_at_end, peak_height, base_offset, align, name, realizes))
+        # 0 is "not given": a plain number keeps the tool's schema plain (no anyOf with null).
+        return built(building.add_wall(model(), storey, start, end, height, thickness, height_at_end or None, peak_height or None, base_offset, align, name, realizes))
 
     @tool
     def ifc_add_slab(
