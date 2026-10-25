@@ -170,7 +170,7 @@ python3 tools/dependency_currency.py
 | `.claude-plugin/plugin.json`, `.mcp.json` | the plugin, Claude Code format |
 | `tools/dependency_currency.py`, `dependency-holds.toml` | the monthly dependency check, and its holds |
 | `tools/measure.py` | a session's peak memory while it renders, in flo2's container shape, for the broker's cap |
-| `skills/read-a-building-model/references/starting-a-model.md` | the starting model a chat copies to start a building model from nothing; flo2 serves an unchanged copy beside its skill `read-a-building-model` |
+| `skills/read-a-building-model/` | the skill a chat reads (since 0.7.0): its rules in `SKILL.md`, its recipes in `references/` (each named by SKILL.md), among them `starting-a-model.md`, the starting model a chat copies; flo2 serves the whole folder unchanged, and `tests/test_skill.py` holds each file to 16,000 bytes. A new feature adds a page or grows one, never the whole skill |
 | `tests/` | the smoke, tool-list, reader, starting-model, manifest and dependency-check tests, the synthetic models, 0.3.1's tool list, and the vendored schemas |
 | `.github/workflows/ci.yml` | tests on Python 3.12, and the image built and run as flo2 confines it |
 | `.github/workflows/dependencies.yml` | the monthly dependency check |

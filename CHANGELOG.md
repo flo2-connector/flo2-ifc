@@ -17,6 +17,14 @@ failing until now, draws. It adds two pins and 890 MB to the image, so this is a
 - **Fixed: ifcmcp's image tools failed after drawing.** flo2-ifc read ifcmcp's tools with mcp 2.x's `ImageContent`
   set in ifcmcp's server module, then put it back to None; `ifc_render` and `ifc_plot` look it up when called, so
   both failed with "'NoneType' object is not callable" once they had drawn. It is now left set.
+- **The skill read-a-building-model lives here, split** (Anthony's ruling of 2026-10-25 in flo2's design
+  1a97fc1f1de4d5d2: "Yes, go with your recommendations"). Until now flo2 wrote its SKILL.md, one page every feature
+  added a section to (4,205 bytes on 2026-10-03, 26,766 on 2026-10-24, its reply 67 characters under flo2's
+  30,000-character limit), and a render section would have put it over. Now `skills/read-a-building-model/SKILL.md`
+  holds the rules (11,120 bytes) and names a page for each kind of task: `large-models.md`, `measuring.md`,
+  `drawing.md` (with the new 3D picture), `ids.md`, `validation-rules.md`, `editing.md` and `shapes.md`, beside
+  `starting-a-model.md`; flo2 serves the whole folder unchanged. `tests/test_skill.py` holds each file to 16,000
+  bytes, SKILL.md to naming every page, and every tool a page names to one the server serves.
 - **The image is 1.55 GB** (0.6.0: 660 MB): VTK's libraries 565 MB, Mesa's LLVM 124 MB, matplotlib 34 MB.
 - **`tools/measure.py`**: a session's peak memory while it renders (memory.peak, and the anonymous peak sampled from
   memory.stat), in flo2's container shape, for the broker's cap. Measured on 2026-10-25 under a 1 GiB cap, one CPU,

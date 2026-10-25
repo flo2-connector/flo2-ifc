@@ -9,8 +9,10 @@ The repository holds seven things:
 - the pinned set, in `pyproject.toml`;
 - the readers for a whole building, the measures and drawings, and the checks (IDS and buildingSMART's rules), in
   `src/flo2_ifc/` (below);
-- the starting model a chat copies to start a building model from nothing, in
-  `skills/read-a-building-model/references/starting-a-model.md` (since 0.5.1; below, "Starting a model from nothing");
+- the skill a chat reads to work with a building model, `skills/read-a-building-model/` (since 0.7.0; until then
+  flo2 wrote it): its rules in `SKILL.md`, and its recipes in pages beside it, `references/`, which SKILL.md names
+  and flo2 serves unchanged. One of them, `references/starting-a-model.md` (since 0.5.1; below, "Starting a model
+  from nothing"), is the starting model a chat copies to start a building model from nothing;
 - the container recipe flo2.io builds, in `Dockerfile`;
 - the plugin, in two formats;
 - a small CI;
@@ -361,7 +363,11 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 ## The tests and the checks
 
-`python -m pytest` runs twelve test files:
+`python -m pytest` runs thirteen test files:
+
+- `tests/test_skill.py` holds the skill read-a-building-model to its shape: each file at most 16,000 bytes (flo2
+  serves each in one reply of at most 30,000 characters), SKILL.md naming every page beside it and no other, and
+  every tool a page names one the server serves.
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp 2.3.0 client. It checks that:
   - the server initializes as `ifc-mcp`, with instructions;
