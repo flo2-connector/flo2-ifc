@@ -18,7 +18,8 @@ A difference here means the tools changed. If that is meant, for example on a
 new ifcopenshell-mcp, flo2's real-ifcmcp door test must be changed with it.
 
 Since 0.5.0 three tools are ADDED after 0.3.1's (``NEW_SINCE``): the IDS check,
-the IDS writer and buildingSMART's rules. Every tool 0.3.1 listed is still
+the IDS writer and buildingSMART's rules; since 0.6.0 four more, the building
+steps (a wall, a slab, a roof and a room, each in one call). Every tool 0.3.1 listed is still
 listed the same, in the same order, and nothing else is new.
 """
 
@@ -39,7 +40,7 @@ from tests.test_smoke import flo2_ifc_command
 
 BEFORE = json.loads((Path(__file__).parent / "tools-0.3.1.json").read_text())
 #: The tools added since 0.3.1, in the order they are listed after its tools.
-NEW_SINCE = ["ifc_check_ids", "ifc_write_ids", "ifc_check_rules"]
+NEW_SINCE = ["ifc_check_ids", "ifc_write_ids", "ifc_check_rules", "ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space"]
 
 #: Calls that fail, each keyed as tools-0.3.1.json keys its error. The first
 #: group runs with no model open, the second after ifc_new.

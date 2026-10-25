@@ -27,7 +27,11 @@ in ifcopenshell 0.9.0; and since 0.5.0 the checks ``ifc_check_ids`` (the model
 against an IDS, with IfcOpenShell's ifctester) and ``ifc_check_rules``
 (buildingSMART's normative validation rules, run offline), and
 ``ifc_write_ids``, which builds an IDS with ifctester's API (checking.py,
-rules.py).
+rules.py); and since 0.6.0 the building steps ``ifc_add_wall``, ``ifc_add_slab``,
+``ifc_add_roof`` and ``ifc_add_space``, each making one ordinary part of a
+building in ONE call: the element, its shape, its place, its storey and its
+link to the design part it realizes, with IfcOpenShell's own api functions
+(building.py).
 
 Every tool, ifcmcp's and flo2-ifc's, is registered through one catch
 (``_reason_kept``): a failure reaches the agent as a ToolError with its own
@@ -52,11 +56,27 @@ import functools
 import inspect
 from typing import Any
 
-from flo2_ifc import checking, drawing, geometry, reading, rules
+from flo2_ifc import building, checking, drawing, geometry, reading, rules
 
 #: The tools this module replaces or adds, by name.
 REPLACED = ("ifc_summary", "ifc_tree", "ifc_select", "ifc_info", "ifc_relations", "ifc_validate", "ifc_quantify")
-ADDED = ("ifc_extent", "ifc_units", "ifc_footprint", "ifc_volume", "ifc_distance", "ifc_draw", "ifc_check_ids", "ifc_write_ids", "ifc_check_rules")
+ADDED = (
+    "ifc_extent",
+    "ifc_units",
+    "ifc_footprint",
+    "ifc_volume",
+    "ifc_distance",
+    "ifc_draw",
+    "ifc_check_ids",
+    "ifc_write_ids",
+    "ifc_check_rules",
+    "ifc_add_wall",
+    "ifc_add_slab",
+    "ifc_add_roof",
+    "ifc_add_space",
+)
+#: The added tools that change the session's model (building.py), counted as edits like ifc_edit.
+BUILDS = ("ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space")
 
 #: The session's methods that change its model, and those that replace it.
 CHANGES = ("ifc_edit", "ifc_shape", "ifc_quantify")
@@ -547,6 +567,141 @@ def build_server() -> Any:
         :param limit: How many issues to list (default 50).
         """
         return rules.check_rules(model(), path(), rule_sets=rule_sets, start=start, offset=offset, limit=limit, edits=watched["edits"])
+
+    def built(out: dict[str, Any]) -> dict[str, Any]:
+        """A building step changed the model: count it as an edit, as ifc_edit is, and forget kept meshes."""
+        geometry.changed()
+        watched["edits"] += 1
+        out["units"] = reading.units(model())["say"]
+        return out
+
+    @tool
+    def ifc_add_wall(
+        storey: str,
+        start: list[float],
+        end: list[float],
+        height: float,
+        thickness: float,
+        height_at_end: float = 0.0,
+        peak_height: float = 0.0,
+        base_offset: float = 0.0,
+        align: str = "centre",
+        name: str = "",
+        realizes: str = "",
+    ) -> dict[str, Any]:
+        """Add a WALL in one call: made, shaped, placed, put on its storey and
+        linked to the design part it realizes. It runs along a baseline from
+        ``start`` to ``end`` (points in plan, [x, y]), stands on the storey's
+        level, and is ``height`` high and ``thickness`` thick. A sloped top
+        rises from ``height`` at the start to ``height_at_end`` at the end; a
+        gable end rises from ``height`` at both ends to ``peak_height`` in the
+        middle. Every length is in the model's length unit (ifc_units), as
+        ifc_extent gives them. Changes only the session's copy.
+
+        :param storey: The storey it stands on, by name or id (ifc_tree names them).
+        :param start: Where its baseline starts, [x, y].
+        :param end: Where its baseline ends, [x, y].
+        :param height: Its height (at its start, when its top slopes).
+        :param thickness: Its thickness.
+        :param height_at_end: Optional: its height at its end, for a sloped top
+            (0 or left out: a level top).
+        :param peak_height: Optional: its height in the middle, for a gable end
+            (0 or left out: none).
+        :param base_offset: Optional: how far above the storey's level its bottom is (default 0).
+        :param align: Optional: "centre" (default) on the baseline, or "left" or
+            "right" of it, looking from start to end.
+        :param name: Optional: its name, e.g. "North wall".
+        :param realizes: Optional: the id of the design part it realizes, e.g.
+            "cmp:north-wall"; kept as a reference in the classification "flo2 design".
+        """
+        # 0 is "not given": a plain number keeps the tool's schema plain (no anyOf with null).
+        return built(building.add_wall(model(), storey, start, end, height, thickness, height_at_end or None, peak_height or None, base_offset, align, name, realizes))
+
+    @tool
+    def ifc_add_slab(
+        storey: str,
+        footprint: list[list[float]],
+        thickness: float,
+        top_offset: float = 0.0,
+        kind: str = "floor",
+        name: str = "",
+        realizes: str = "",
+    ) -> dict[str, Any]:
+        """Add a SLAB in one call: made, shaped, placed, put on its storey and
+        linked to the design part it realizes. It covers ``footprint`` (its
+        corners in order, each [x, y] in plan), its top at the storey's level
+        (plus ``top_offset``), ``thickness`` deep below it. Every length is in
+        the model's length unit (ifc_units). Changes only the session's copy.
+
+        :param storey: The storey it is the floor of, by name or id.
+        :param footprint: Its corners in order around it, e.g. [[0, 0], [30, 0], [30, 20], [0, 20]].
+        :param thickness: How deep it is.
+        :param top_offset: Optional: how far above the storey's level its top is (default 0).
+        :param kind: Optional: "floor" (default) or "baseslab".
+        :param name: Optional: its name.
+        :param realizes: Optional: the id of the design part it realizes.
+        """
+        return built(building.add_slab(model(), storey, footprint, thickness, top_offset, kind, name, realizes))
+
+    @tool
+    def ifc_add_roof(
+        storey: str,
+        footprint: list[list[float]],
+        kind: str,
+        eave_height: float,
+        slope: float,
+        thickness: float,
+        overhang: float = 0.0,
+        name: str = "",
+        realizes: str = "",
+    ) -> dict[str, Any]:
+        """Add a ROOF in one call: an IfcRoof on the storey, made of sloped
+        roof planes (IfcSlab), shaped, placed and linked to the design part it
+        realizes. "shed": one plane, its low eave along the footprint's FIRST
+        side (its first two corners), rising across it. "gable": two planes,
+        their eaves along the first side and the side across from it, meeting
+        at a ridge halfway across. ``eave_height`` is where the underside meets
+        the footprint's eave side (the top of the wall), above the storey's
+        level; ``slope`` is rise over run (0.25 for 3 in 12). Every length is
+        in the model's length unit (ifc_units). Changes only the session's copy.
+
+        :param storey: The storey it sits on, by name or id.
+        :param footprint: The outline it covers, its corners in order, the eave side first.
+        :param kind: "shed" or "gable".
+        :param eave_height: The underside's height at the eave side, above the storey's level.
+        :param slope: Rise over run, e.g. 0.25.
+        :param thickness: Its thickness, square to the plane.
+        :param overhang: Optional: how far it reaches beyond the footprint all round (default 0).
+        :param name: Optional: its name.
+        :param realizes: Optional: the id of the design part it realizes.
+        """
+        return built(building.add_roof(model(), storey, footprint, kind, eave_height, slope, thickness, overhang, name, realizes))
+
+    @tool
+    def ifc_add_space(
+        storey: str,
+        footprint: list[list[float]],
+        height: float,
+        floor_offset: float = 0.0,
+        name: str = "",
+        long_name: str = "",
+        realizes: str = "",
+    ) -> dict[str, Any]:
+        """Add a ROOM (IfcSpace) in one call: made, shaped, placed, part of its
+        storey as a room is, and linked to the design part it realizes. It
+        covers ``footprint`` (its corners in order, each [x, y] in plan) from
+        the storey's level up ``height``. Every length is in the model's length
+        unit (ifc_units). Changes only the session's copy.
+
+        :param storey: The storey it is on, by name or id.
+        :param footprint: Its corners in order around it.
+        :param height: Its height.
+        :param floor_offset: Optional: how far above the storey's level its floor is (default 0).
+        :param name: Optional: its name (often its number), e.g. "101".
+        :param long_name: Optional: its long name, e.g. "Shop floor".
+        :param realizes: Optional: the id of the design part it realizes.
+        """
+        return built(building.add_space(model(), storey, footprint, height, floor_offset, name, long_name, realizes))
 
     @tool
     def ifc_validate(express_rules: bool = False, start: int = 0) -> dict[str, Any]:

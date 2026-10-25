@@ -44,17 +44,17 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --disable-pip-version-check ".[test]"
-      # The smoke test's own questions (initialize, the 34 tools, ifc_new then
+      # The smoke test's own questions (initialize, the 38 tools, ifc_new then
       # ifc_summary, a synthetic millimetre house opened from /design and read
       # with the paged readers, its extent and its validation, then measured and
       # drawn to a PNG inside the image's /tmp, an IDS written and checked, and
-      # buildingSMART's rules run), and the tool list compared
+      # buildingSMART's rules run, and a wall built in one call), and the tool list compared
       # with flo2-ifc 0.3.1's (tests/test_tool_list.py), asked of the
       # image under flo2-tool-sandbox's flags, with a folder mounted read-only
       # at /design, as flo2 mounts a design's.
       - name: A folder for the house, mounted as a design is
         run: mkdir -p "$RUNNER_TEMP/design" && chmod 0755 "$RUNNER_TEMP/design"
-      - name: It serves its 34 tools over stdio, confined like flo2's slot
+      - name: It serves its 38 tools over stdio, confined like flo2's slot
         env:
           FLO2_IFC_DESIGN_DIR: ${{ runner.temp }}/design
           FLO2_IFC_DESIGN_SEEN_AS: /design
