@@ -278,3 +278,57 @@ def wall_with_a_door(schema: str = "IFC4") -> ifcopenshell.file:
     run("feature.add_filling", f, opening=opening, element=door)
     run("spatial.assign_container", f, relating_structure=storey, products=[door])
     return f
+
+
+#: through_two_storeys(), in metres: storeys GROUND at 0 and LOFT at 3; a wall rising from GROUND through LOFT.
+TWO_STOREYS = {"loft_z": 3.0, "wall": (6.0, 6.0, 0.2), "door_at": 1.0, "window_at": 3.5}
+
+
+def through_two_storeys(schema: str = "IFC4") -> ifcopenshell.file:
+    """Two storeys, GROUND (0) and LOFT (3 m), and an outer wall 6 m long and 6 m high that rises from GROUND
+    through LOFT: CONTAINED in GROUND and REFERENCED into LOFT (IfcRelReferencedInSpatialStructure), as IFC asks
+    of an element that spans storeys. A door fills an opening in it on GROUND (contained in GROUND) and a window
+    fills one on LOFT (contained in LOFT), and LOFT holds its own partition.
+    fact:loft-plan-still-omits-walls-referenced-into-the-loft-2026-10-25 (Shop sample 671a764fa790c030): a plan
+    of the upper storey drew the windows and left out the wall they sit in."""
+    run = ifcopenshell.api.run
+    f = run("project.create_file", version=schema)
+    project = run("root.create_entity", f, ifc_class="IfcProject", name="Two storeys")
+    run("unit.assign_unit", f, units=[run("unit.add_si_unit", f, unit_type="LENGTHUNIT")])
+    model3d = run("context.add_context", f, context_type="Model")
+    body = run("context.add_context", f, context_type="Model", context_identifier="Body", target_view="MODEL_VIEW", parent=model3d)
+    site = run("root.create_entity", f, ifc_class="IfcSite", name="Site")
+    bldg = run("root.create_entity", f, ifc_class="IfcBuilding", name="Building")
+    ground = run("root.create_entity", f, ifc_class="IfcBuildingStorey", name="GROUND")
+    loft = run("root.create_entity", f, ifc_class="IfcBuildingStorey", name="LOFT")
+    ground.Elevation, loft.Elevation = 0.0, TWO_STOREYS["loft_z"]
+    run("aggregate.assign_object", f, relating_object=project, products=[site])
+    run("aggregate.assign_object", f, relating_object=site, products=[bldg])
+    run("aggregate.assign_object", f, relating_object=bldg, products=[ground, loft])
+    for p in (site, bldg, ground):
+        _place(f, p)
+    _place(f, loft, z=TWO_STOREYS["loft_z"])
+
+    def made(cls, name, length, height, thick, x=0.0, y=0.0, z=0.0):
+        e = run("root.create_entity", f, ifc_class=cls, name=name)
+        rep = run("geometry.add_wall_representation", f, context=body, length=length, height=height, thickness=thick)
+        run("geometry.assign_representation", f, product=e, representation=rep)
+        _place(f, e, x=x, y=y, z=z)
+        return e
+
+    length, height, thick = TWO_STOREYS["wall"]
+    wall = made("IfcWall", "Outer wall", length, height, thick)
+    run("spatial.assign_container", f, relating_structure=ground, products=[wall])
+    run("spatial.reference_structure", f, products=[wall], relating_structure=loft)
+    for cls, name, at, z, w, h, storey in (
+        ("IfcDoor", "Ground door", TWO_STOREYS["door_at"], 0.0, 0.9, 2.1, ground),
+        ("IfcWindow", "Loft window", TWO_STOREYS["window_at"], TWO_STOREYS["loft_z"] + 0.9, 1.2, 1.2, loft),
+    ):
+        opening = made("IfcOpeningElement", f"Opening for the {name.lower()}", w, h, 2 * thick, x=at, y=-thick / 2, z=z)
+        run("feature.add_feature", f, feature=opening, element=wall)
+        filling = made(cls, name, w, h, 0.05, x=at, y=thick / 2 - 0.025, z=z)
+        run("feature.add_filling", f, opening=opening, element=filling)
+        run("spatial.assign_container", f, relating_structure=storey, products=[filling])
+    partition = made("IfcWall", "Loft partition", 3.0, 2.4, 0.1, x=1.0, y=2.0, z=TWO_STOREYS["loft_z"])
+    run("spatial.assign_container", f, relating_structure=loft, products=[partition])
+    return f

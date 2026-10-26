@@ -31,10 +31,10 @@ A large building model read through flo2 (2026-10-23) showed five problems. A ch
 
 | ifcmcp's tool | On a large model | flo2-ifc's reader |
 |---|---|---|
-| `ifc_tree` | over 200,000 characters | places in full, each with its elements counted by class; elements a page at a time, filtered by `storey` and `element_type` |
+| `ifc_tree` | over 200,000 characters | places in full, each with its elements counted by class; elements a page at a time, filtered by `storey` and `element_type`; since 0.8.1, also the elements referenced into a storey (a wall rising from the storey below), marked and counted apart |
 | `ifc_relations` on a storey | over 150,000 characters | each long list paged (`offset`, `limit`) and filtered by `element_type`; `lists` says what was withheld |
 | `ifc_select` "IfcWall" | over 100,000 characters | sorted, a page at a time, with `counts`; the tool text says `location = "<storey>"` selects by storey |
-| `ifc_info` on a room | no storey (a room is part of its storey, not contained in it) | adds `storey`, found through containment or aggregation, with the path |
+| `ifc_info` on a room | no storey (a room is part of its storey, not contained in it) | adds `storey`, found through containment or aggregation, with the path; since 0.8.1, `referenced_into`, the other storeys an element spanning storeys is referenced into |
 | `ifc_validate` | over 100 s, one call | checks as much as one call allows (30 s), says `complete` and `next_start`; the schema's rules run in a forked child that is stopped at the call's time |
 | (none) | no way to say how high the roof is | `ifc_extent`: bounding boxes from the geometry, in the model's unit, metres, and feet and inches |
 | (none) | replies said lengths were "usually metres" | `ifc_units`, and `units` in every reply that carries a length, area or volume |
@@ -108,6 +108,15 @@ labelled with the area measured from its outline. The reply's `room_areas` says,
 `stored` or `measured`), and where a stored area and the measured outline differ by more than 5% of the stored one
 (`AREA_DIFFERS`) it names the room and both numbers in `notes`: an authoring tool measures a room to its own rules
 (to a wall's finish face or its centre, with or without a column), and the difference is a fact about the model.
+
+**A storey holds what is referenced into it (since 0.8.1).** IFC places an element that spans storeys, such as a wall
+rising through two, in one storey (contained) and references it into the others (`IfcRelReferencedInSpatialStructure`),
+so that it is part of each. A plan or a section limited to a storey draws both what the storey contains and what is
+referenced into it, with the parts of each that belong to no other storey; so a plan of an upper storey cuts the wall
+rising through it and leaves out that wall's door below. Until 0.8.1 the drawings, and `ifc_tree`, walked only what
+a storey contains, and a plan of a loft drew its windows floating where the wall should be (flo2-ifc's design
+1510fc3728665dbf, `fact:a-storeys-readers-walk-only-what-it-contains-not-what-is-referenced-into-it-2026-10-26`).
+A selector's `location = "<storey>"` is IfcOpenShell's and still picks only what the storey contains.
 
 **Openings are cut (since 0.8.0).** The meshes the measures and drawings read are made with IfcOpenShell's opening
 subtraction ON (`geometry.mesh_settings`), so a wall is measured and drawn as built: a 5 x 3 x 0.2 m wall with a
@@ -431,6 +440,13 @@ uv venv -p 3.12 && uv pip install '.[test]'
   (`models.wall_with_a_door()`): its volume less the opening (2.622 m3), a section through the door that cuts the
   wall only above the opening, an elevation that shows the door, a plan cut that shows the gap, and a mesh kept per
   setting.
+- `tests/test_referenced_elements.py` (since 0.8.1) draws and reads two storeys with a wall that rises from the lower
+  through the upper, contained in the lower and referenced into the upper (`models.through_two_storeys()`): the
+  upper storey's plan and section cut the wall, its plan leaves out the wall's door on the lower storey, `ifc_tree`
+  lists the wall under both storeys, and `ifc_info` names the storey it is referenced into.
+- `tests/test_clash_touching.py` (since 0.8.1) holds a known false result of IfcOpenShell 0.9.0's clash check as a
+  strict expected failure: a rail flush between the two jambs of an opening reported piercing the wall, on 15 of 36
+  turns of a model in feet. The fix is IfcOpenShell's; the release that carries it turns this test red.
 - `tests/test_reading.py` tests each reader on synthetic models, at sizes that pass a reply's budget (400 walls on
   one storey), and with a time limit of zero so a partial answer is tested too. No real person's model is ever a
   fixture.

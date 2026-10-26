@@ -183,6 +183,17 @@ def storey_of(element: ifcopenshell.entity_instance) -> dict[str, Any] | None:
     return None
 
 
+def referenced_into(place: ifcopenshell.entity_instance) -> list[ifcopenshell.entity_instance]:
+    """The elements REFERENCED into a spatial place (IfcRelReferencedInSpatialStructure), in the model's order.
+
+    IFC places an element that spans storeys, such as a wall rising through two of them, in ONE storey (contained,
+    IfcRelContainedInSpatialStructure) and references it into each of the others, so that it is part of each
+    (fact:loft-plan-still-omits-walls-referenced-into-the-loft-2026-10-25 in the Shop sample 671a764fa790c030).
+    Whatever answers "what is on this storey" reads both: what the storey contains, and this.
+    """
+    return [e for rel in getattr(place, "ReferencesElements", []) or [] for e in rel.RelatedElements]
+
+
 def _storey_z(storey: ifcopenshell.entity_instance) -> float | None:
     if not getattr(storey, "ObjectPlacement", None):
         return None
@@ -276,8 +287,12 @@ def tree(model: ifcopenshell.file, storey: str = "", element_type: str = "", off
     """The spatial structure, with the elements in each place listed a page at a time.
 
     Every place (site, building, storey, space) is given in full, with how many
-    elements of each IFC class it holds (``element_counts``). Its elements are
-    listed in tree order, ``limit`` at a time from ``offset``, filtered to
+    elements of each IFC class it holds (``element_counts``) and, when others are
+    referenced into it (an element that spans storeys is contained in one and
+    referenced into the others: ``referenced_into``), how many of those
+    (``referenced_counts``). Its elements are listed in tree order, those it
+    contains first and then those referenced into it, each of these marked
+    ``"referenced": true``, ``limit`` at a time from ``offset``, filtered to
     ``element_type`` when given; ``storey`` (an id or a name) gives that storey
     alone. A storey also says its ``elevation`` as stored and its placed ``z``,
     both in the model's length unit.
@@ -303,6 +318,12 @@ def tree(model: ifcopenshell.file, storey: str = "", element_type: str = "", off
             for e in contained:
                 if not element_type or e.is_a(element_type):
                     flat.append((node, _brief(e)))
+        referenced = referenced_into(place)
+        if referenced:
+            node["referenced_counts"] = dict(Counter(e.is_a() for e in referenced).most_common())
+            for e in referenced:
+                if not element_type or e.is_a(element_type):
+                    flat.append((node, _brief(e) | {"referenced": True}))
         if children:
             node["children"] = children
         return node
@@ -432,11 +453,15 @@ def _is_class(model: ifcopenshell.file, item: dict[str, Any], element_type: str)
 
 
 def info_extra(model: ifcopenshell.file, element: ifcopenshell.entity_instance) -> dict[str, Any]:
-    """What ifc_info adds to ifcquery's answer: the storey, and the units."""
+    """What ifc_info adds to ifcquery's answer: the storey, the other storeys it is referenced into, and the units."""
     extra: dict[str, Any] = {"units": units(model)["say"]}
     if element.is_a("IfcProduct"):
         found = storey_of(element)
         extra["storey"] = found if found else None
+        also = [s for s in ifcopenshell.util.element.get_referenced_structures(element) if s.is_a("IfcBuildingStorey")]
+        if also:
+            # An element that spans storeys is contained in one (`storey`) and referenced into the others.
+            extra["referenced_into"] = [{"id": s.id(), "name": s.Name, "elevation": getattr(s, "Elevation", None)} for s in also]
     return extra
 
 

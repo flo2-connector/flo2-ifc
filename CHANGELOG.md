@@ -2,6 +2,35 @@
 
 flo2-ifc's versions, newest first. Versions before 0.3.1 are described in README.md, in the sections marked "since".
 
+## 0.8.1 (unreleased)
+
+A fix: no tool is added or removed, and every tool's name, arguments and description are 0.8.0's. A plan of a storey,
+and `ifc_tree`, can now hold more than before.
+
+- **A storey holds what is referenced into it** (`fact:a-storeys-readers-walk-only-what-it-contains-not-what-is-referenced-into-it-2026-10-26`;
+  reported on the Shop sample, `fact:loft-plan-still-omits-walls-referenced-into-the-loft-2026-10-25`). A plan of a
+  loft left out the outer walls that rise through it from the storey below, though it drew the loft windows set in
+  them. IFC places such a wall in its lowest storey (contained) and references it into the others; the readers that
+  answer "what is on this storey" walked only containment and decomposition. Now, in one place
+  (`reading.referenced_into`):
+  - a plan, and a section or elevation limited to a storey, draw what is referenced into the storey too, with the
+    parts of each that belong to no other storey (the wall, not its door below) (`drawing.storey_elements`);
+  - `ifc_tree` lists a storey's referenced elements after those it contains, each marked `"referenced": true`, and
+    counts them in `referenced_counts`;
+  - `ifc_info` names the other storeys an element is referenced into (`referenced_into`).
+
+  `tests/test_referenced_elements.py` (`models.through_two_storeys`) failed on 0.8.0 on all four (the plan, the
+  section, the storey's elements and the tree) before the fix. A selector's `location = "<storey>"` is IfcOpenShell's
+  and still picks only what the storey contains; the skill's `references/large-models.md` says so.
+- **Known false result, pinned: `ifc_clash` on an element flush between two jambs**
+  (`fact:ifc-clash-reports-an-element-touching-both-jambs-as-piercing-the-wall-2026-10-26` in IfcOpenShell's design
+  23d874b1643673ad; reported on the Shop sample as `fact:ifc-clash-still-ignores-openings-in-flo2-ifc-0-8-0-2026-10-25`).
+  The clash does cut openings. A rail exactly as long as the opening it stands in was reported piercing the wall as
+  deep as the wall is thick: IfcOpenShell's clash tree counts the places where an edge's own ends touch the other
+  shape as a piercing, when rounding puts them inside the edge. The fix is IfcOpenShell's, prepared in the fork and
+  not offered yet; nothing is changed here. `tests/test_clash_touching.py` holds it as a strict expected failure, so
+  the ifcopenshell release that fixes it turns the test red and the mark comes off.
+
 ## 0.8.0 (unreleased)
 
 The four building steps each take a new optional argument, `frame`, and the measures and drawings now cut openings,

@@ -10,6 +10,10 @@ one answer, and nothing should be read whole:
   `element_type`; `ifc_relations` with `element_type`; `ifc_select` with `location`.
 - Counts come first: `ifc_summary` and `ifc_tree`'s `element_counts` and `ifc_select`'s `counts` answer "how many"
   without listing.
+- An element that spans storeys, such as a wall rising through two, is contained in one storey and referenced into
+  the others. `ifc_tree` lists it under each, marked `"referenced": true` and counted in `referenced_counts`;
+  `ifc_info` names the others (`referenced_into`); a plan of each storey cuts it. `location = "<storey>"` in a
+  selector picks only what the storey contains.
 - `ifc_validate` checks for about 30 s a call. When the answer says `complete: false`, call again with `start` set
   to its `next_start`; only `complete: true` with `valid: true` means the whole model passed. The rules
   (`express_rules`) may not finish in one call on a model this size, and the answer says so.
