@@ -135,8 +135,16 @@ def _drawable(e: ifcopenshell.entity_instance) -> bool:
 
 
 def storey_elements(storey: ifcopenshell.entity_instance) -> tuple[list[ifcopenshell.entity_instance], list[ifcopenshell.entity_instance]]:
-    """A storey's elements (what it contains, and their parts) and its rooms (spaces)."""
-    parts = ifcopenshell.util.element.get_decomposition(storey)
+    """A storey's elements and its rooms (spaces): what it contains, with their parts, and what is REFERENCED into it
+    (reading.referenced_into), with those parts of each that belong to no other storey. So a plan of an upper storey
+    cuts the wall rising through it from the storey below, and leaves out that wall's door on the storey below."""
+    parts = set(ifcopenshell.util.element.get_decomposition(storey))
+    for e in reading.referenced_into(storey):
+        parts.add(e)
+        for part in ifcopenshell.util.element.get_decomposition(e):
+            container = ifcopenshell.util.element.get_container(part)
+            if container is None or container == storey:
+                parts.add(part)
     elements = sorted({e.id(): e for e in parts if _drawable(e)}.values(), key=lambda e: e.id())
     spaces = sorted({e.id(): e for e in parts if e.is_a("IfcSpace")}.values(), key=lambda e: e.id())
     return elements, spaces
