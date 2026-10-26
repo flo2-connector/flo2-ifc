@@ -176,7 +176,7 @@ def test_the_starting_model_opens_as_project_site_building_and_storeys_in_feet(t
     assert [(s.Name, s.Elevation) for s in m.by_type("IfcBuildingStorey")] == [("Level 1", 0.0), ("Level 2", 10.0)]
     storey_z = [ifcopenshell.util.placement.get_local_placement(s.ObjectPlacement)[2][3] for s in m.by_type("IfcBuildingStorey")]
     assert storey_z == [0.0, 10.0], "each storey is placed at its height"
-    assert said["units"]["say"] == "Lengths are in feet (ft), areas in square feet and volumes in cubic feet, as the model declares them."
+    assert said["units"]["say"].startswith("Lengths are in feet (ft), areas in square feet and volumes in cubic feet, as the model declares them.")  # and, since 0.9.0, that nothing else is declared
     assert site.RefLatitude == (40, 44, 54, 384000) and site.RefLongitude == (-73, -59, -8, -390400)
     (context,) = [c for c in m.by_type("IfcGeometricRepresentationContext") if not c.is_a("IfcGeometricRepresentationSubContext")]
     assert {s.ContextIdentifier for s in context.HasSubContexts} == {"Body", "Axis"}
@@ -199,7 +199,7 @@ def test_with_new_globalids_as_a_chat_writes_it_it_passes(tmp_path):
 @needs_rules
 def test_in_metres_it_passes(tmp_path):
     said = checked(in_metres(starting()), tmp_path, "metres")
-    assert said["units"]["say"] == "Lengths are in metres (m), areas in square metres and volumes in cubic metres, as the model declares them."
+    assert said["units"]["say"].startswith("Lengths are in metres (m), areas in square metres and volumes in cubic metres, as the model declares them.")  # and, since 0.9.0, that nothing else is declared
     assert [s.Elevation for s in said["model"].by_type("IfcBuildingStorey")] == [0.0, 3.0]
     assert_no_errors(said, warnings=set())
 
