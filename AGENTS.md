@@ -25,15 +25,19 @@ It holds the exact set flo2.io installs to run IfcOpenShell's ifcmcp:
 
 Its one piece of server code is a thin layer: `flo2_ifc.server.build_server` serves every tool ifcmcp's own server
 defines on flo2-ifc's own `MCPServer` (MCP Python SDK 2.x), then replaces seven of them (`ifc_summary`, `ifc_tree`, `ifc_select`, `ifc_info`, `ifc_relations`, `ifc_validate`,
-`ifc_quantify`) with readers that page, filter, keep to one call's time and name the model's units, and adds thirteen
+`ifc_quantify`) with readers that page, filter, keep to one call's time and name the model's units, and adds fourteen
 (`ifc_extent`, `ifc_units`; since 0.3.0 the measures `ifc_footprint`, `ifc_volume`, `ifc_distance` and the drawing
 `ifc_draw`; since 0.5.0 the checks `ifc_check_ids`, `ifc_write_ids` and `ifc_check_rules`; since 0.6.0 the building
-steps `ifc_add_wall`, `ifc_add_slab`, `ifc_add_roof` and `ifc_add_space`). README.md, "The readers for a whole
+steps `ifc_add_wall`, `ifc_add_slab`, `ifc_add_roof` and `ifc_add_space`; since 0.9.0 `ifc_add_unit`). README.md, "The readers for a whole
 building", "Measures and drawings", "Checks" and "Building steps", says why each one exists. It
 also watches the session's editing methods (`_watch_changes`), so a measure says when the copy was edited and a kept
 mesh is never drawn after an edit. Keep it thin:
 
 - a replacement keeps its tool's name and only adds optional arguments;
+- an argument is renamed only to the name `ARGUMENT_NAMES` gives its thing (one element `element_id`, several
+  `element_ids`, a selector `selector`), and its old name stays taken as an alias (`ALIASES`), so a call shaped by an
+  older tool list, which flo2's door and chats keep, is answered the same (since 0.9.0);
+- a value with a measure is never given without its unit, or without saying the model declares none (since 0.9.0);
 - a reader returns plain data and never writes the model; `ifc_draw` writes only its two files, where it is told;
 - a building step (`building.py`) writes only the session's copy, with IfcOpenShell's own api functions (never an
   entity built by hand where a function exists), checks every input before it touches the model, and runs in one
@@ -107,7 +111,7 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp client. It checks:
   - the server's name and instructions;
-  - ifcmcp's 25 tools and flo2-ifc's thirteen, with the readers', measures', checks' and building steps' arguments;
+  - ifcmcp's 25 tools and flo2-ifc's fourteen, with the readers', measures', checks' and building steps' arguments;
   - that `ifc_new` and then `ifc_summary` both answer;
   - that a synthetic millimetre house reads whole through the readers, and is measured and drawn (a PNG through
     cairo, so the image's cairo library and fonts are checked too), and rendered in 3D with `ifc_render` (so the
@@ -133,6 +137,10 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
   whose sizes are known (`models.SITE`).
 - `tests/test_openings.py` measures and draws a wall with an opening and a door (`models.wall_with_a_door()`): the
   meshes behind the measures and drawings cut openings (since 0.8.0); `ifc_extent`'s boxes do not need to.
+- `tests/test_units.py` builds a window with a U-factor and no unit for it (ifcopenshell.api): every declared unit
+  listed, the U-factor said to have none, `ifc_add_unit` declaring units and refusing what is not one, and `ifc_edit`
+  refusing to write the U-factor until its unit is declared.
+- `tests/test_argument_names.py` holds every tool to one name for each thing, and every old name to still working.
 - `tests/test_manifests.py` validates the Agent Plugins manifests against the schemas in `tests/schemas/`, and checks
   that both formats agree.
 - `tests/test_dependency_currency.py` tests the dependency check against fake registry data. It makes no network calls.
@@ -160,9 +168,9 @@ python3 tools/dependency_currency.py
 |---|---|
 | `pyproject.toml` | **the pinned set**, and the `flo2-ifc` console script |
 | `src/flo2_ifc/__init__.py` | `main()`: the `flo2-ifc` command |
-| `src/flo2_ifc/server.py` | the server on MCP SDK 2.x: ifcmcp's tools, the readers in front of seven, and thirteen added |
-| `src/flo2_ifc/building.py` | the building steps: a wall, a slab, a roof and a room, each made, shaped, placed, put on its storey and linked to its design part in one call |
-| `src/flo2_ifc/reading.py` | the readers: paging, storeys, units, extent (and height above a datum), timed validation |
+| `src/flo2_ifc/server.py` | the server on MCP SDK 2.x: ifcmcp's tools, the readers in front of seven, fourteen added, one name for each thing an argument names (`ARGUMENT_NAMES`) with every old name still taken (`ALIASES`), and ifc_edit's property writes held to a declared unit |
+| `src/flo2_ifc/building.py` | the building steps: a wall, a slab, a roof and a room, each made, shaped, placed, put on its storey and linked to its design part in one call; a project unit declared (`add_unit`), and the check that holds ifc_edit's property writes to a declared unit |
+| `src/flo2_ifc/reading.py` | the readers: paging, storeys, every unit and each property's unit, extent (and height above a datum), timed validation |
 | `src/flo2_ifc/geometry.py` | the meshes (kept per session), footprints, volumes and closedness, distances, and `cite` |
 | `src/flo2_ifc/drawing.py` | plans, sections and elevations to scale, as SVG and PNG |
 | `src/flo2_ifc/checking.py` | the IDS check and the IDS writer, with ifctester |

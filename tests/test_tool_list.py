@@ -19,8 +19,16 @@ new ifcopenshell-mcp, flo2's real-ifcmcp door test must be changed with it.
 
 Since 0.5.0 three tools are ADDED after 0.3.1's (``NEW_SINCE``): the IDS check,
 the IDS writer and buildingSMART's rules; since 0.6.0 four more, the building
-steps (a wall, a slab, a roof and a room, each in one call). Every tool 0.3.1 listed is still
-listed the same, in the same order, and nothing else is new.
+steps (a wall, a slab, a roof and a room, each in one call); since 0.9.0 one
+more, ``ifc_add_unit``. Every tool 0.3.1 listed is still listed, in the same
+order, and nothing else is new.
+
+Since 0.9.0 seven of flo2-ifc's tools name their arguments by one rule
+(server.py, ``ARGUMENT_NAMES``) and their descriptions say so, and ifc_summary,
+ifc_units and ifc_info say every unit (``RENAMED``, ``REDESCRIBED``). Their
+schemas are not 0.3.1's any more; instead every argument 0.3.1 took is still
+taken, under its own name or as an alias of its new one, with the same type
+accepted and the same arguments required.
 """
 
 from __future__ import annotations
@@ -36,11 +44,16 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
+from flo2_ifc.server import ALIASES
 from tests.test_smoke import flo2_ifc_command
 
 BEFORE = json.loads((Path(__file__).parent / "tools-0.3.1.json").read_text())
 #: The tools added since 0.3.1, in the order they are listed after its tools.
-NEW_SINCE = ["ifc_check_ids", "ifc_write_ids", "ifc_check_rules", "ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space"]
+NEW_SINCE = ["ifc_check_ids", "ifc_write_ids", "ifc_check_rules", "ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space", "ifc_add_unit"]
+#: Since 0.9.0: tools whose arguments were renamed (ALIASES) or now also take a GlobalId (element_id).
+RENAMED = ["ifc_select", "ifc_info", "ifc_relations", "ifc_extent", "ifc_footprint", "ifc_volume", "ifc_distance"]
+#: Since 0.9.0: tools whose descriptions changed: those renamed, and the three that say every unit.
+REDESCRIBED = [*RENAMED, "ifc_summary", "ifc_units"]
 
 #: Calls that fail, each keyed as tools-0.3.1.json keys its error. The first
 #: group runs with no model open, the second after ifc_new.
@@ -118,7 +131,27 @@ def test_only_the_new_tools_are_added(now):
 def test_every_tool_takes_the_same_arguments(now):
     before = {t["name"]: t["inputSchema"] for t in BEFORE["tools"]}
     for tool in _old(now):
-        assert tool["inputSchema"] == before[tool["name"]], tool["name"]
+        if tool["name"] not in RENAMED:
+            assert tool["inputSchema"] == before[tool["name"]], tool["name"]
+
+
+def _types(prop: dict) -> set[str]:
+    return {prop["type"]} if "type" in prop else {t.get("type") for t in prop.get("anyOf", [])}
+
+
+def test_every_argument_a_renamed_tool_took_is_still_taken(now):
+    """A caller holding 0.3.1's tool list still calls the same way: each old argument is served under its own name or
+    taken as an alias of its new one (server.ALIASES), its old type is still accepted, and what was required still is."""
+    before = {t["name"]: t["inputSchema"] for t in BEFORE["tools"]}
+    for tool in [t for t in _old(now) if t["name"] in RENAMED]:
+        name, old, new = tool["name"], before[tool["name"]], tool["inputSchema"]
+        renamed = ALIASES.get(name, {})
+        for arg, prop in old["properties"].items():
+            served = renamed.get(arg, arg)
+            assert served in new["properties"], (name, arg)
+            assert _types(prop) <= _types(new["properties"][served]), (name, arg)
+        assert {renamed.get(a, a) for a in old.get("required", [])} == set(new.get("required", [])), name
+        assert not set(renamed) & set(new["properties"]), (name, "an old name is still served")
 
 
 def test_every_tool_answers_in_the_same_shape(now):
@@ -130,7 +163,8 @@ def test_every_tool_answers_in_the_same_shape(now):
 def test_every_tool_keeps_its_description(now):
     before = {t["name"]: t["description_sha256"] for t in BEFORE["tools"]}
     for tool in _old(now):
-        assert tool["description_sha256"] == before[tool["name"]], tool["name"]
+        if tool["name"] not in REDESCRIBED:
+            assert tool["description_sha256"] == before[tool["name"]], tool["name"]
 
 
 @pytest.mark.parametrize("key", [k for k, _, _ in FAILING + FAILING_WITH_A_MODEL])

@@ -121,7 +121,7 @@ def elements_named(model: ifcopenshell.file, text: str) -> list[ifcopenshell.ent
     tokens = [t for t in text.replace(",", " ").split() if t]
     if all(re.fullmatch(r"#?\d+", t) or re.fullmatch(r"[0-9A-Za-z_$]{22}", t) for t in tokens):
         try:
-            return geometry.choose(model, ids=text)[0]
+            return geometry.choose(model, element_ids=text)[0]
         except ValueError:
             if not all(re.fullmatch(r"#?\d+", t) for t in tokens):
                 pass  # 22 letters may be a class or a name: try it as a selector

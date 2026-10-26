@@ -31,7 +31,14 @@ rules.py); and since 0.6.0 the building steps ``ifc_add_wall``, ``ifc_add_slab``
 ``ifc_add_roof`` and ``ifc_add_space``, each making one ordinary part of a
 building in ONE call: the element, its shape, its place, its storey and its
 link to the design part it realizes, with IfcOpenShell's own api functions
-(building.py).
+(building.py); and since 0.9.0 ``ifc_add_unit``, which declares a project unit
+(a U-factor's, before a U-factor is written).
+
+Since 0.9.0 every unit a model declares is read, and each measured property's
+unit (reading.py, "WHAT A VALUE WITH NO UNIT OF ITS OWN IS IN"); ifc_edit's
+property writes are held to a declared unit (``_hold_units``); and every tool
+names what it is about one way (``ARGUMENT_NAMES``), taking each old name as an
+alias (``ALIASES``, applied before a call's arguments are checked).
 
 Every tool, ifcmcp's and flo2-ifc's, is registered through one catch
 (``_reason_kept``): a failure reaches the agent as a ToolError with its own
@@ -74,9 +81,48 @@ ADDED = (
     "ifc_add_slab",
     "ifc_add_roof",
     "ifc_add_space",
+    "ifc_add_unit",
 )
 #: The added tools that change the session's model (building.py), counted as edits like ifc_edit.
-BUILDS = ("ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space")
+BUILDS = ("ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space", "ifc_add_unit")
+
+#: ONE NAME FOR ONE THING (since 0.9.0; flo2's design 1a97fc1f1de4d5d2,
+#: fact:root-cause-a-helpers-describe-is-refused-because-the-client-holds-a-tool-list-without-it-2026-10-26). Every
+#: tool names what it is about the way most tools already did: one element is ``element_id`` (six tools named it so,
+#: one named it ``a``/``b``), several are ``element_ids`` (ifcmcp's ifc_plot and ifc_render; flo2-ifc's footprint and
+#: volume said ``ids``), and a selector is ``selector`` (six tools; ifc_select said ``query``). An element is named by
+#: its step id or its GlobalId wherever flo2-ifc reads it. Left as they are, with reasons: ifcmcp's ``ifc_schema``
+#: takes ``entity_type``, the IFC class whose schema it reads, which is most often not an element (an
+#: IfcPropertySingleValue, an IfcRelAggregates), so ``element_type`` would misname it; ifcmcp's own ``ifc_clash``,
+#: ``ifc_plot`` and ``ifc_render`` already use these names and keep ifcmcp's integer ids; ``ifc_draw``'s ``through``,
+#: ``around`` and ``highlight`` each name a role (cut through these, draw around those), not which element a call is
+#: about.
+ARGUMENT_NAMES = {
+    "element_id": "one element: its step id or its GlobalId",
+    "element_ids": "several elements: step ids or GlobalIds",
+    "selector": "an IfcOpenShell selector",
+    "element_type": "an IFC class the listed elements are kept to",
+}
+#: Each argument's old name, still taken: a caller holding an old tool list (flo2's door and chats keep the list they
+#: connected with) calls the old way and is answered the same. Served schemas show only the new names.
+ALIASES = {
+    "ifc_select": {"query": "selector"},
+    "ifc_footprint": {"ids": "element_ids"},
+    "ifc_volume": {"ids": "element_ids"},
+    "ifc_distance": {"a": "element_id", "b": "other_element_id"},
+}
+
+
+def canonical_arguments(tool: str, arguments: dict[str, Any] | None) -> dict[str, Any]:
+    """`arguments` with every old name (ALIASES) given its new one. Both names with different values is refused."""
+    arguments = dict(arguments or {})
+    for old, new in ALIASES.get(tool, {}).items():
+        if old in arguments:
+            value = arguments.pop(old)
+            if new in arguments and arguments[new] != value:
+                raise ValueError(f"{tool} was given `{new}` and its old name `{old}`, with different values; give `{new}` only.")
+            arguments[new] = value
+    return arguments
 
 #: The session's methods that change its model, and those that replace it.
 CHANGES = ("ifc_edit", "ifc_shape", "ifc_quantify")
@@ -195,13 +241,61 @@ def _reason_kept(fn):
     return call
 
 
+def _hold_units(session: Any) -> None:
+    """Hold ifc_edit's pset.edit_pset and pset.edit_qto to a declared unit (building.py, "A UNIT IS DECLARED BEFORE A
+    VALUE IN IT IS WRITTEN"): a measured value they would store with no unit is not written, and the reply says how to
+    declare the unit. Every other edit runs as ifcmcp runs it. Wrapped before ``_watch_changes``, so a refused edit is
+    not counted as one."""
+    inner = getattr(session, "ifc_edit", None)
+    if inner is None:
+        return
+
+    @functools.wraps(inner)
+    def edit(function_path: str, params: Any = "{}"):
+        if function_path not in building.WRITES_VALUES:
+            return inner(function_path=function_path, params=params)
+        model = session._require_model()
+        model.begin_transaction()
+        try:
+            out = inner(function_path=function_path, params=params)
+        finally:
+            model.end_transaction()
+        missing = building.unit_missing_after_edit(model, function_path, params) if isinstance(out, dict) and out.get("ok") else []
+        if not missing:
+            return out
+        model.undo()
+        return {
+            "ok": False,
+            "error": (
+                f"Not written: {', '.join(missing)} would be stored with no unit, because the model declares none for that measure"
+                " and the property names none, so the number would mean nothing in particular. Declare the unit first with"
+                " ifc_add_unit (the unit the value is in, e.g. unit_type THERMALTRANSMITTANCEUNIT in W/(m2.K) or Btu/(hr.ft2.°F)),"
+                " then write the value in it. Nothing was changed."
+            ),
+        }
+
+    session.ifc_edit = edit
+
+
 def build_server() -> Any:
     from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    class Server(MCPServer):
+        """MCPServer, taking each tool's old argument names (ALIASES) as its new ones."""
+
+        async def call_tool(self, name, arguments, context=None):
+            try:
+                arguments = canonical_arguments(name, arguments)
+            except ValueError as e:
+                raise ToolError(str(e)) from e
+            return await super().call_tool(name, arguments, context)
 
     recorded = _ifcmcp_tools()
     session = _session_of(recorded)
+    _hold_units(session)
     watched = _watch_changes(session)
-    server = MCPServer(**recorded.kwargs)
+    server = Server(**recorded.kwargs)
     for fn, kwargs in recorded.tools:
         if fn.__name__ not in REPLACED:
             server.tool(**kwargs)(_reason_kept(fn))
@@ -223,8 +317,8 @@ def build_server() -> Any:
     @tool
     def ifc_summary() -> dict[str, Any]:
         """What the model holds: its IFC schema, its project, how many of each
-        IFC class, and the units it declares for lengths, areas and volumes
-        (``units``)."""
+        IFC class, and every unit it declares (``units``, as ifc_units gives
+        them)."""
         m = model()
         out = summary_mod.summary(m)
         out["units"] = reading.units(m)
@@ -232,11 +326,15 @@ def build_server() -> Any:
 
     @tool
     def ifc_units() -> dict[str, Any]:
-        """The length, area and volume units the model declares in its
-        IfcUnitAssignment: each one's name, symbol and how many metres (square
-        metres, cubic metres) one of it is. Every length, area and volume the
-        model STORES is in these units: a Revit export is often in millimetres,
-        with areas in square metres. Read it before quoting a stored number."""
+        """Every unit the model declares in its IfcUnitAssignment (``declared``):
+        SI, conversion-based (a foot), derived (a U-factor's W/(m2.K)) and its
+        currency, each with its unit type, what it measures, its name, symbol and
+        how many SI units one of it is; and its length, area and volume units by
+        name. Every value the model STORES with no unit of its own is in these:
+        a Revit export is often in millimetres, with areas in square metres. A
+        measure with no unit here (often a U-factor) has NO unit in the model:
+        ``say`` says so, and ifc_info's ``property_units`` says which properties.
+        Read it before quoting a stored number."""
         return reading.units(model())
 
     @tool
@@ -257,7 +355,7 @@ def build_server() -> Any:
         return reading.tree(model(), storey=storey, element_type=element_type, offset=offset, limit=limit)
 
     @tool
-    def ifc_select(query: str, offset: int = 0, limit: int = reading.DEFAULT_LIMIT) -> dict[str, Any]:
+    def ifc_select(selector: str, offset: int = 0, limit: int = reading.DEFAULT_LIMIT) -> dict[str, Any]:
         """Find elements with an IfcOpenShell selector; each one's id, IFC
         class and name, sorted by id, a page at a time, with how many of each
         class matched (``counts``).
@@ -267,21 +365,24 @@ def build_server() -> Any:
         ``IfcDoor, location = "Level 1"`` (the doors on the storey named
         Level 1; a space or building name works too).
 
-        :param query: The selector.
+        :param selector: The selector (until 0.9.0 ``query``, still taken).
         :param offset: Where the page starts (the reply's ``page.next_offset``).
         :param limit: How many to list, at most (default 100).
         """
-        return reading.select(model(), query, offset=offset, limit=limit)
+        return reading.select(model(), selector, offset=offset, limit=limit)
 
     @tool
-    def ifc_info(element_id: int) -> dict[str, Any]:
+    def ifc_info(element_id: int | str) -> dict[str, Any]:
         """Everything about one element: its attributes, property sets and
         quantity sets (stored lengths, areas and volumes, in the model's units,
         which ``units`` names), its type, material, placement and shape, and
         the STOREY it is on (``storey``, with the path the model uses: a room
-        is usually part of its storey, a wall contained in it).
+        is usually part of its storey, a wall contained in it). Each measured
+        property's measure type and unit (``property_units``: a U-factor's
+        IfcThermalTransmittanceMeasure and W/(m2.K), from the property itself or
+        the project, or "not declared", which ``units`` then names).
 
-        :param element_id: The element's id (its STEP number).
+        :param element_id: The element: its id (its STEP number) or its GlobalId.
         """
         m = model()
         element = reading.element(m, element_id)
@@ -290,7 +391,7 @@ def build_server() -> Any:
         return out
 
     @tool
-    def ifc_relations(element_id: int, traverse: str = "", element_type: str = "", offset: int = 0, limit: int = reading.DEFAULT_LIMIT) -> dict[str, Any] | list[dict[str, Any]]:
+    def ifc_relations(element_id: int | str, traverse: str = "", element_type: str = "", offset: int = 0, limit: int = reading.DEFAULT_LIMIT) -> dict[str, Any] | list[dict[str, Any]]:
         """How one element relates to the rest of the model: what contains it
         and what it is part of (``hierarchy``), what it contains (``children``),
         its type and the type's occurrences, groups, systems, zones, material
@@ -298,7 +399,7 @@ def build_server() -> Any:
         gives each one's total and what was withheld. ``traverse`` "up" gives
         the chain of places from the element to the project instead.
 
-        :param element_id: The element's id.
+        :param element_id: The element: its id or its GlobalId.
         :param traverse: "up" for the chain to the project.
         :param element_type: Keep only list items of this IFC class (e.g. "IfcDoor").
         :param offset: Where each list's page starts.
@@ -310,7 +411,7 @@ def build_server() -> Any:
         return reading.relations(full, m, element_type=element_type, offset=offset, limit=limit)
 
     @tool
-    def ifc_extent(selector: str = "", element_id: int = 0, offset: int = 0, limit: int = 50, datum: str = "") -> dict[str, Any]:
+    def ifc_extent(selector: str = "", element_id: int | str = 0, offset: int = 0, limit: int = 50, datum: str = "") -> dict[str, Any]:
         """How far elements reach, measured from their geometry: the box
         around them (min and max x, y, z, the overall size, the bottom and the
         top), the element that reaches highest and the one lowest, and each
@@ -324,7 +425,7 @@ def build_server() -> Any:
 
         :param selector: Which elements, as ifc_select takes it (e.g. "IfcRoof"
             or 'IfcDoor, location = "Level 1"').
-        :param element_id: Or one element, by its id.
+        :param element_id: Or one element, by its id or GlobalId.
         :param offset: Where the page of elements starts.
         :param limit: How many elements' boxes to list (default 50).
         :param datum: Optional: heights are also given above this: a
@@ -338,30 +439,30 @@ def build_server() -> Any:
         return reading.extent(model(), selector=selector, element_id=element_id, offset=offset, limit=limit, datum=datum, model_path=path(), edits=watched["edits"])
 
     @tool
-    def ifc_footprint(selector: str = "", ids: str = "", element_id: int = 0, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+    def ifc_footprint(selector: str = "", element_ids: str | list[int | str] = "", element_id: int | str = 0, offset: int = 0, limit: int = 50) -> dict[str, Any]:
         """How much plan area elements cover, from their geometry: each
         element's footprint (its shape projected onto plan), and the SET's
         footprint (``footprint``), in which what is stacked (a slab on a
         footing, a wall over a wall) counts once. ``sum_of_elements`` adds each
         one's own; ``stacked_overlap`` is the difference. In the model's area
         unit, in square metres and in square feet. Name the elements with a
-        selector, ids, or one element id (any together). The reply's ``cite``
+        selector, element_ids, or one element_id (any together). The reply's ``cite``
         names the model file and its sha256, the elements' GlobalIds, the unit
         and the method. A call that runs out of time says ``partial``. Reads
         only.
 
         :param selector: Which elements, as ifc_select takes it (e.g.
             'IfcSlab, location = "Level 1"').
-        :param ids: Or elements by step id or GlobalId, comma separated
-            (e.g. "1203, 1247").
-        :param element_id: Or one element, by its id.
+        :param element_ids: Or elements by step id or GlobalId, comma
+            separated or a list (e.g. "1203, 1247"); until 0.9.0 ``ids``, still taken.
+        :param element_id: Or one element, by its id or GlobalId.
         :param offset: Where the page of elements starts.
         :param limit: How many elements' own footprints to list (default 50).
         """
-        return geometry.footprint(model(), path(), selector=selector, ids=ids, element_id=element_id, offset=offset, limit=limit, edits=watched["edits"])
+        return geometry.footprint(model(), path(), selector=selector, element_ids=element_ids, element_id=element_id, offset=offset, limit=limit, edits=watched["edits"])
 
     @tool
-    def ifc_volume(selector: str = "", ids: str = "", element_id: int = 0, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+    def ifc_volume(selector: str = "", element_ids: str | list[int | str] = "", element_id: int | str = 0, offset: int = 0, limit: int = 50) -> dict[str, Any]:
         """How much solid elements hold, from their geometry, and which of
         their shapes are NOT CLOSED. A volume is given only for a closed mesh
         (every edge shared by two triangles, or closed at its seams); an OPEN
@@ -373,27 +474,30 @@ def build_server() -> Any:
         only.
 
         :param selector: Which elements, as ifc_select takes it.
-        :param ids: Or elements by step id or GlobalId, comma separated.
-        :param element_id: Or one element, by its id.
+        :param element_ids: Or elements by step id or GlobalId, comma
+            separated or a list; until 0.9.0 ``ids``, still taken.
+        :param element_id: Or one element, by its id or GlobalId.
         :param offset: Where the page of elements starts.
         :param limit: How many elements to list (default 50).
         """
-        return geometry.volume(model(), path(), selector=selector, ids=ids, element_id=element_id, offset=offset, limit=limit, edits=watched["edits"])
+        return geometry.volume(model(), path(), selector=selector, element_ids=element_ids, element_id=element_id, offset=offset, limit=limit, edits=watched["edits"])
 
     @tool
-    def ifc_distance(a: str, b: str) -> dict[str, Any]:
+    def ifc_distance(element_id: int | str, other_element_id: int | str) -> dict[str, Any]:
         """The distance between two elements, from their geometry: the
         shortest gap between their surfaces (``clear_distance``, 0 when they
         touch or overlap) with the two closest points, the gap between their
         boxes along x, y and z, and the distance between their centres, in
         plan and in height. In the model's length unit, in metres and in feet
         and inches. The reply's ``cite`` names the model file and its sha256,
-        both GlobalIds, the unit and the method. Reads only.
+        both GlobalIds, the unit and the method. The reply calls the two ``a``
+        and ``b``. Reads only.
 
-        :param a: One element: its step id or its GlobalId.
-        :param b: The other.
+        :param element_id: One element: its step id or its GlobalId (until
+            0.9.0 ``a``, still taken).
+        :param other_element_id: The other (until 0.9.0 ``b``, still taken).
         """
-        return geometry.distance(model(), path(), a=a, b=b, edits=watched["edits"])
+        return geometry.distance(model(), path(), element_id=element_id, other_element_id=other_element_id, edits=watched["edits"])
 
     @tool
     def ifc_draw(
@@ -730,6 +834,37 @@ def build_server() -> Any:
             building's walls). The reply's ``frame`` says which was used.
         """
         return built(building.add_space(model(), storey, footprint, height, floor_offset, name, long_name, realizes, frame))
+
+    @tool
+    def ifc_add_unit(unit_type: str, unit: str = "", prefix: str = "", parts: list[dict[str, Any]] = []) -> dict[str, Any]:  # noqa: B006 - read only; a plain list keeps the schema plain (no anyOf with null)
+        """Declare one of the model's units in one call (its IfcUnitAssignment),
+        so the values stored in that measure carry it: a U-factor's unit before
+        a U-factor is written, a temperature's, a currency. An SI unit by name
+        (WATT, KELVIN, METRE with prefix MILLI); a conversion-based one by name,
+        with its exact factor (foot, inch, square foot, btu, hour, fahrenheit,
+        pound, degree); a derived one from its ``parts``; a currency by its
+        code. A unit type the model already declares is refused (its stored
+        values are read in that unit). Write each value in the unit declared:
+        ifc_edit's pset.edit_pset refuses a measured value whose unit the model
+        does not declare. Changes only the session's copy.
+
+        :param unit_type: What it measures, as IFC names it: LENGTHUNIT,
+            THERMODYNAMICTEMPERATUREUNIT, THERMALTRANSMITTANCEUNIT (a U-factor),
+            THERMALRESISTANCEUNIT (an R-value), MONETARYUNIT, ...
+        :param unit: A named unit: an SI name or a conversion-based name; for
+            MONETARYUNIT, the currency's ISO code (USD).
+        :param prefix: Optional: an SI unit's prefix (MILLI, KILO).
+        :param parts: A derived unit's parts, each {"unit": name, "exponent":
+            n, "prefix": optional}: W/(m2.K) is [{"unit": "WATT"}, {"unit":
+            "METRE", "exponent": -2}, {"unit": "KELVIN", "exponent": -1}];
+            Btu/(hr.ft2.°F) is [{"unit": "btu"}, {"unit": "hour", "exponent":
+            -1}, {"unit": "square foot", "exponent": -1}, {"unit":
+            "fahrenheit", "exponent": -1}].
+        """
+        out = building.add_unit(model(), unit_type, unit, prefix, parts)
+        geometry.changed()
+        watched["edits"] += 1
+        return out
 
     @tool
     def ifc_validate(express_rules: bool = False, start: int = 0) -> dict[str, Any]:

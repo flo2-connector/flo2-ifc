@@ -2,6 +2,50 @@
 
 flo2-ifc's versions, newest first. Versions before 0.3.1 are described in README.md, in the sections marked "since".
 
+## 0.9.0 (unreleased)
+
+One tool is added (`ifc_add_unit`, 39 tools), seven tools' arguments are renamed with every old name still taken, and
+`ifc_units`, `ifc_summary` and `ifc_info` say more: a minor release. flo2 re-pins to take it (its pinned tool list and
+the skill pages it serves change). Two root causes found on 2026-10-26:
+
+- **Every unit, and the unit of every measured value**
+  (1510fc3728665dbf, `fact:root-cause-a-u-factor-in-a-model-carries-no-unit-and-the-reader-reports-only-length-area-volume-2026-10-26`).
+  A window's U-factor (`Pset_WindowCommon` `ThermalTransmittance` 1.70348) came back bare: the model declared no
+  thermal transmittance unit, `reading.units()` read only lengths, areas and volumes, property values came back with
+  no measure type or unit, and every reply's note spoke only of lengths, areas and volumes. Now:
+  - `ifc_units` lists EVERY unit the IfcUnitAssignment holds (`declared`): SI, conversion-based, derived and the
+    currency, each with its unit type, what it measures, IFC class, name, symbol and SI scale. Symbols are composed
+    for derived units (W/(m2.K), btu/(hr.ft2.°F)) from a full SI table, where IfcOpenShell answered `?/m2.?`. The
+    `length`, `area` and `volume` entries are as before;
+  - `units`, in every reply, also names the other units declared and says that a value of any other measure has no
+    unit unless its property names one: never assume SI. IFC4 states no default beyond the project's assignment
+    (`IfcPropertySingleValue.Unit`, `IfcPhysicalSimpleQuantity.Unit`; cited in `reading.py`);
+  - `ifc_info` adds `property_units`: each measured property's and quantity's measure type and unit, from the
+    property itself, the project, or `"not declared"`, which its `units` then names. `property_sets` is unchanged;
+  - **new tool `ifc_add_unit`** declares one project unit in one call with IfcOpenShell's `unit` functions: an SI
+    unit, a conversion-based one with its exact factor (NIST SP 811; IfcOpenShell's table rounds several and gives
+    a degree Fahrenheit as 1.8 K, which would make a Btu U-factor 3.24 times too large), a derived one from its
+    `parts` checked against its unit type's dimensions, or a currency; a unit type already declared is refused.
+    ifcmcp's `ifc_edit` could not declare a derived unit (`unit.add_derived_unit` fails with "Attribute not set");
+  - `ifc_edit`'s `pset.edit_pset` and `pset.edit_qto` write a measured value only in a declared unit: a value that
+    would be stored with no unit is not written (`{"ok": false, "error": ...}`, the edit undone), and the reply says
+    to declare the unit first. Every other edit is ifcmcp's, unchanged.
+
+  `tests/test_units.py` builds the window in feet with ifcopenshell.api.
+- **One name for one thing across the tools, every old name still taken**
+  (1a97fc1f1de4d5d2, `fact:root-cause-a-helpers-describe-is-refused-because-the-client-holds-a-tool-list-without-it-2026-10-26`,
+  its flo2-ifc part). The rule is the name most tools already used (`server.ARGUMENT_NAMES`): one element
+  `element_id`, several `element_ids`, a selector `selector`. `ifc_select`'s `query` is now `selector`;
+  `ifc_footprint`'s and `ifc_volume`'s `ids` is `element_ids` (text or a list); `ifc_distance`'s `a` and `b` are
+  `element_id` and `other_element_id` (its reply still calls them `a` and `b`); and `element_id` in `ifc_info`,
+  `ifc_relations`, `ifc_extent`, `ifc_footprint` and `ifc_volume` takes a GlobalId as well as a step id. Every old
+  name is taken as an alias (`server.ALIASES`, applied before the arguments are checked: until now an unknown name
+  was silently dropped), and an old and a new name with different values is refused. Served schemas show the new
+  names only. Kept, with reasons in `server.py`: ifcmcp's `ifc_schema` `entity_type` (an IFC class, most often not an
+  element's), ifcmcp's `ifc_clash`/`ifc_plot`/`ifc_render` (already these names), `ifc_draw`'s role names.
+  `tests/test_argument_names.py` holds the rule and every alias; `tests/test_tool_list.py` now holds the seven
+  renamed tools to taking every argument 0.3.1 took.
+
 ## 0.8.1 (unreleased)
 
 A fix: no tool is added or removed, and every tool's name, arguments and description are 0.8.0's. A plan of a storey,

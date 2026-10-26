@@ -186,38 +186,31 @@ def meshes(model: ifcopenshell.file, elements: list[ifcopenshell.entity_instance
 # ---------------------------------------------------------------- choosing elements
 
 
-def choose(model: ifcopenshell.file, selector: str = "", ids: str = "", element_id: int = 0) -> tuple[list[ifcopenshell.entity_instance], str]:
-    """The elements a call is about: a selector, a list of ids, one id, or several of these.
+def choose(model: ifcopenshell.file, selector: str = "", element_ids: str | list[int | str] = "", element_id: int | str = 0) -> tuple[list[ifcopenshell.entity_instance], str]:
+    """The elements a call is about: a selector, a list of elements, one element, or several of these.
 
-    ``ids`` is step ids or GlobalIds, separated by commas or spaces, such as
-    ``"1203, 1247"`` or ``"2N1qx4tVn5RQ7hPZbG0Kd8"``. Returns the elements,
-    sorted by id, and how the call named them."""
+    ``element_ids`` is step ids or GlobalIds, separated by commas or spaces, such as
+    ``"1203, 1247"`` or ``"2N1qx4tVn5RQ7hPZbG0Kd8"``, or a list of them (``[1203, 1247]``);
+    ``element_id`` is one, either way. Returns the elements, sorted by id, and how the
+    call named them."""
     found: dict[int, ifcopenshell.entity_instance] = {}
     said: list[str] = []
     if element_id:
         e = reading.element(model, element_id)
         found[e.id()] = e
-        said.append(f"#{element_id}")
-    for token in [t for t in ids.replace(",", " ").split() if t]:
-        t = token.lstrip("#")
-        if t.isdigit():
-            e = reading.element(model, int(t))
-        else:
-            try:
-                e = model.by_guid(t)
-            except RuntimeError:
-                e = None
-            if e is None:
-                raise ValueError(f"No element has the id or GlobalId {token!r}.")
+        said.append(f"#{e.id()}")
+    text = ", ".join(str(t) for t in element_ids) if isinstance(element_ids, list) else str(element_ids or "")
+    for token in [t for t in text.replace(",", " ").split() if t]:
+        e = reading.element(model, token)
         found[e.id()] = e
-    if ids.strip():
-        said.append(f"ids {ids.strip()}")
+    if text.strip():
+        said.append(f"element_ids {text.strip()}")
     if selector.strip():
         for e in ifcopenshell.util.selector.filter_elements(model, selector):
             found[e.id()] = e
         said.append(selector.strip())
     if not said:
-        raise ValueError("Name what to measure: `selector` (such as 'IfcSlab, location = \"Level 1\"'), `ids` (step ids or GlobalIds), or `element_id`.")
+        raise ValueError("Name what to measure: `selector` (such as 'IfcSlab, location = \"Level 1\"'), `element_ids` (step ids or GlobalIds), or `element_id`.")
     return [found[k] for k in sorted(found)], " + ".join(said)
 
 
@@ -407,8 +400,8 @@ def footprint(
     model: ifcopenshell.file,
     model_path: str | None = None,
     selector: str = "",
-    ids: str = "",
-    element_id: int = 0,
+    element_ids: str | list[int | str] = "",
+    element_id: int | str = 0,
     offset: int = 0,
     limit: int = 50,
     edits: int = 0,
@@ -426,7 +419,7 @@ def footprint(
     offset, limit = reading._check_page(offset, limit)
     started = time.monotonic()
     budget = reading.SECONDS if seconds is None else seconds
-    targets, asked = choose(model, selector, ids, element_id)
+    targets, asked = choose(model, selector, element_ids, element_id)
     got, stopped = meshes(model, targets, started + budget)
     u = Units(model)
     rows = []
@@ -490,8 +483,8 @@ def volume(
     model: ifcopenshell.file,
     model_path: str | None = None,
     selector: str = "",
-    ids: str = "",
-    element_id: int = 0,
+    element_ids: str | list[int | str] = "",
+    element_id: int | str = 0,
     offset: int = 0,
     limit: int = 50,
     edits: int = 0,
@@ -508,7 +501,7 @@ def volume(
     offset, limit = reading._check_page(offset, limit)
     started = time.monotonic()
     budget = reading.SECONDS if seconds is None else seconds
-    targets, asked = choose(model, selector, ids, element_id)
+    targets, asked = choose(model, selector, element_ids, element_id)
     got, stopped = meshes(model, targets, started + budget)
     u = Units(model)
     rows: list[dict[str, Any]] = []
@@ -729,8 +722,8 @@ def surface_distance(a: Mesh, b: Mesh, deadline: float) -> dict[str, Any]:
 def distance(
     model: ifcopenshell.file,
     model_path: str | None = None,
-    a: str = "",
-    b: str = "",
+    element_id: int | str = "",
+    other_element_id: int | str = "",
     edits: int = 0,
     seconds: float | None = None,
 ) -> dict[str, Any]:
@@ -738,14 +731,13 @@ def distance(
 
     Also the gap between their boxes along each axis (0 where they overlap on
     that axis), the distance between their boxes' centres, and in plan.
-    ``a`` and ``b`` are each one element: its step id or its GlobalId. Reads only."""
+    ``element_id`` and ``other_element_id`` are each one element: its step id or its
+    GlobalId; the reply calls them ``a`` and ``b``. Reads only."""
     started = time.monotonic()
     budget = reading.SECONDS if seconds is None else seconds
-    ea_list, _ = choose(model, ids=a) if a.strip() else ([], "")
-    eb_list, _ = choose(model, ids=b) if b.strip() else ([], "")
-    if len(ea_list) != 1 or len(eb_list) != 1:
-        raise ValueError("Name exactly one element in `a` and one in `b`: each by its step id or its GlobalId.")
-    ea, eb = ea_list[0], eb_list[0]
+    if str(element_id).strip() in ("", "0") or str(other_element_id).strip() in ("", "0"):
+        raise ValueError("Name exactly one element in `element_id` and one in `other_element_id`: each by its step id or its GlobalId.")
+    ea, eb = reading.element(model, element_id), reading.element(model, other_element_id)
     got, stopped = meshes(model, [ea, eb], started + budget)
     missing = [e for e in (ea, eb) if e.id() not in got]
     if missing:
@@ -776,7 +768,7 @@ def distance(
         model,
         model_path,
         [ea, eb],
-        f"a = {a.strip()}, b = {b.strip()}",
+        f"element_id = {str(element_id).strip()}, other_element_id = {str(other_element_id).strip()}",
         u.length,
         "Distance: the shortest distance between the two elements' triangle meshes (IfcOpenShell's geometry, world coordinates), "
         "exact over every corner, edge and triangle; box gaps and centres from the meshes' axis-aligned boxes.",

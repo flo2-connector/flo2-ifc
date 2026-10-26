@@ -11,6 +11,9 @@ Edit only what the person asked for, and say what you will change before you cha
    `ifc_info` to check it took.
 3. **Check it.** `ifc_validate`. An error means the model is no longer valid IFC: put it right before
    going on.
+   A measured value (a U-factor through `pset.edit_pset`) is written only in a unit the model declares. If it is
+   refused for that, ask the person which unit the number is in, declare it with `ifc_add_unit` (a U-factor in
+   W/(m2.K) or Btu/(hr.ft2.°F): its `parts`), then write the number in that unit, unconverted.
 4. **Keep it as a new file.** Saving writes a NEW file beside the original, which stays as it was.
    Tell the person the new file's name.
 
