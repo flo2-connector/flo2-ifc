@@ -42,6 +42,7 @@ The steps are additive: ifcmcp's ``ifc_edit`` and ``ifc_shape`` stay for anythin
 
 from __future__ import annotations
 
+import json
 import math
 from typing import Any
 
@@ -527,3 +528,259 @@ def _first_side(raw: Any, corners: list[tuple[float, float]]) -> tuple[tuple[flo
 def _unit(v: tuple[float, float, float]) -> tuple[float, float, float]:
     n = math.sqrt(sum(c * c for c in v))
     return (v[0] / n, v[1] / n, v[2] / n)
+
+
+# ------------------------------------------------------------------ units
+
+# A UNIT IS DECLARED BEFORE A VALUE IN IT IS WRITTEN (since 0.9.0; 1510fc3728665dbf,
+# fact:root-cause-a-u-factor-in-a-model-carries-no-unit-and-the-reader-reports-only-length-area-volume-2026-10-26).
+# A property's value with no unit of its own is in the project's unit for its measure (reading.py, "WHAT A VALUE WITH NO
+# UNIT OF ITS OWN IS IN"), and a model that assigns none for that measure stores a bare number: a U-factor of 1.70348
+# that the reader cannot tell from 1.70348 Btu/(hr.ft2.°F). ifcmcp's ifc_edit cannot declare a derived unit
+# (unit.add_derived_unit takes its elements as a mapping of entities to exponents, which ifcedit cannot pass: it fails
+# with "Attribute not set"), so `add_unit` declares any project unit in one call, and `unit_missing_after_edit` holds
+# an ifc_edit that writes a measured value to a declared unit.
+
+#: Exact factors for the conversion-based units `add_unit` declares, in SI units (the kilogram for a mass), by the
+#: name IfcOpenShell gives each (ifcopenshell.util.unit.imperial_types, which also says its unit type). IfcOpenShell's
+#: own table (si_conversions) rounds several (a yard 0.914 m, a mile 1609 m, a pound 0.454 kg) and gives a degree
+#: Fahrenheit as 1.8 K where it is 5/9 K, which would make a Btu/(hr.ft2.°F) U-factor 3.24 times too large; these are
+#: the exact definitions (NIST SP 811, appendix B: the international foot and pound of 1959, the International Table
+#: Btu). A Fahrenheit temperature also takes IfcOpenShell's offset; inside a derived unit it is a difference, as IFC
+#: reads a derived unit's elements.
+CONVERSIONS = {
+    "thou": 2.54e-5, "inch": 0.0254, "foot": 0.3048, "yard": 0.9144, "mile": 1609.344,
+    "square thou": 6.4516e-10, "square inch": 6.4516e-4, "square foot": 0.09290304, "square yard": 0.83612736,
+    "acre": 4046.8564224, "square mile": 2589988.110336,
+    "cubic thou": 1.6387064e-14, "cubic inch": 1.6387064e-5, "cubic foot": 0.028316846592, "cubic yard": 0.764554857984,
+    "cubic mile": 4168181825.440579584, "litre": 0.001,
+    "fluid ounce UK": 2.84130625e-5, "fluid ounce US": 2.95735295625e-5, "pint UK": 5.6826125e-4, "pint US": 4.73176473e-4,
+    "gallon UK": 4.54609e-3, "gallon US": 3.785411784e-3,
+    "degree": math.pi / 180,
+    "ounce": 0.028349523125, "pound": 0.45359237, "ton UK": 1016.0469088, "ton US": 907.18474, "tonne": 1000.0,
+    "lbf": 4.4482216152605, "pound-force": 4.4482216152605, "kip": 4448.2216152605,
+    "psi": 6894.757293168361, "pound-force per square inch": 6894.757293168361, "ksi": 6894757.293168361,
+    "minute": 60.0, "hour": 3600.0, "day": 86400.0,
+    "btu": 1055.05585262,
+    "fahrenheit": 5 / 9,
+}  # fmt: skip
+
+#: The SI dimensions (length, mass, time, current, temperature, amount, luminous intensity) of each derived unit type
+#: IFC4 names (IfcDerivedUnitEnum, from the SI unit its documentation gives each), so a derived unit is checked to be
+#: what it says before it is declared. A type not listed here is declared unchecked, and the reply says so.
+DERIVED_DIMENSIONS = {
+    "ACCELERATIONUNIT": (1, 0, -2, 0, 0, 0, 0),  # m/s2
+    "ANGULARVELOCITYUNIT": (0, 0, -1, 0, 0, 0, 0),  # rad/s
+    "AREADENSITYUNIT": (-2, 1, 0, 0, 0, 0, 0),  # kg/m2
+    "COMPOUNDPLANEANGLEUNIT": (0, 0, 0, 0, 0, 0, 0),
+    "CURVATUREUNIT": (-1, 0, 0, 0, 0, 0, 0),  # rad/m
+    "DYNAMICVISCOSITYUNIT": (-1, 1, -1, 0, 0, 0, 0),  # Pa.s
+    "HEATFLUXDENSITYUNIT": (0, 1, -3, 0, 0, 0, 0),  # W/m2
+    "HEATINGVALUEUNIT": (2, 0, -2, 0, 0, 0, 0),  # J/kg
+    "INTEGERCOUNTRATEUNIT": (0, 0, -1, 0, 0, 0, 0),  # 1/s
+    "IONCONCENTRATIONUNIT": (-3, 1, 0, 0, 0, 0, 0),  # kg/m3
+    "ISOTHERMALMOISTURECAPACITYUNIT": (3, -1, 0, 0, 0, 0, 0),  # m3/kg
+    "KINEMATICVISCOSITYUNIT": (2, 0, -1, 0, 0, 0, 0),  # m2/s
+    "LINEARFORCEUNIT": (0, 1, -2, 0, 0, 0, 0),  # N/m
+    "LINEARMOMENTUNIT": (1, 1, -2, 0, 0, 0, 0),  # N.m/m
+    "LINEARSTIFFNESSUNIT": (0, 1, -2, 0, 0, 0, 0),  # N/m
+    "LINEARVELOCITYUNIT": (1, 0, -1, 0, 0, 0, 0),  # m/s
+    "MASSDENSITYUNIT": (-3, 1, 0, 0, 0, 0, 0),  # kg/m3
+    "MASSFLOWRATEUNIT": (0, 1, -1, 0, 0, 0, 0),  # kg/s
+    "MASSPERLENGTHUNIT": (-1, 1, 0, 0, 0, 0, 0),  # kg/m
+    "MODULUSOFELASTICITYUNIT": (-1, 1, -2, 0, 0, 0, 0),  # N/m2
+    "MODULUSOFLINEARSUBGRADEREACTIONUNIT": (-1, 1, -2, 0, 0, 0, 0),  # N/m2
+    "MODULUSOFROTATIONALSUBGRADEREACTIONUNIT": (1, 1, -2, 0, 0, 0, 0),  # N.m/(m.rad)
+    "MODULUSOFSUBGRADEREACTIONUNIT": (-2, 1, -2, 0, 0, 0, 0),  # N/m3
+    "MOISTUREDIFFUSIVITYUNIT": (3, 0, -1, 0, 0, 0, 0),  # m3/s
+    "MOLECULARWEIGHTUNIT": (0, 1, 0, 0, 0, -1, 0),  # kg/mol
+    "MOMENTOFINERTIAUNIT": (4, 0, 0, 0, 0, 0, 0),  # m4
+    "PLANARFORCEUNIT": (-1, 1, -2, 0, 0, 0, 0),  # N/m2
+    "ROTATIONALFREQUENCYUNIT": (0, 0, -1, 0, 0, 0, 0),  # 1/s
+    "ROTATIONALMASSUNIT": (2, 1, 0, 0, 0, 0, 0),  # kg.m2
+    "ROTATIONALSTIFFNESSUNIT": (2, 1, -2, 0, 0, 0, 0),  # N.m/rad
+    "SECTIONAREAINTEGRALUNIT": (5, 0, 0, 0, 0, 0, 0),  # m5
+    "SECTIONMODULUSUNIT": (3, 0, 0, 0, 0, 0, 0),  # m3
+    "SHEARMODULUSUNIT": (-1, 1, -2, 0, 0, 0, 0),  # N/m2
+    "SOUNDPOWERUNIT": (2, 1, -3, 0, 0, 0, 0),  # W
+    "SOUNDPRESSUREUNIT": (-1, 1, -2, 0, 0, 0, 0),  # Pa
+    "SPECIFICHEATCAPACITYUNIT": (2, 0, -2, 0, -1, 0, 0),  # J/(kg.K)
+    "TEMPERATUREGRADIENTUNIT": (-1, 0, 0, 0, 1, 0, 0),  # K/m
+    "TEMPERATURERATEOFCHANGEUNIT": (0, 0, -1, 0, 1, 0, 0),  # K/s
+    "THERMALADMITTANCEUNIT": (0, 1, -3, 0, -1, 0, 0),  # W/(m2.K)
+    "THERMALCONDUCTANCEUNIT": (1, 1, -3, 0, -1, 0, 0),  # W/(m.K): IfcThermalConductivityMeasure's unit
+    "THERMALEXPANSIONCOEFFICIENTUNIT": (0, 0, 0, 0, -1, 0, 0),  # 1/K
+    "THERMALRESISTANCEUNIT": (0, -1, 3, 0, 1, 0, 0),  # m2.K/W
+    "THERMALTRANSMITTANCEUNIT": (0, 1, -3, 0, -1, 0, 0),  # W/(m2.K)
+    "TORQUEUNIT": (2, 1, -2, 0, 0, 0, 0),  # N.m
+    "VAPORPERMEABILITYUNIT": (0, 0, 1, 0, 0, 0, 0),  # kg/(s.m.Pa)
+    "VOLUMETRICFLOWRATEUNIT": (3, 0, -1, 0, 0, 0, 0),  # m3/s
+    "WARPINGCONSTANTUNIT": (6, 0, 0, 0, 0, 0, 0),  # m6
+    "WARPINGMOMENTUNIT": (3, 1, -2, 0, 0, 0, 0),  # N.m2
+}
+
+#: The ifcopenshell.api functions through ifc_edit that write property or quantity values.
+WRITES_VALUES = ("pset.edit_pset", "pset.edit_qto")
+
+
+def _si_unit_type(name: str) -> str | None:
+    """The unit type an SI unit name belongs to (WATT: POWERUNIT), or None if IFC names no such SI unit."""
+    if name == "DEGREE_CELSIUS":
+        return "THERMODYNAMICTEMPERATUREUNIT"
+    return next((t for t, n in ifcopenshell.util.unit.si_type_names.items() if n == name and t != "USERDEFINED"), None)
+
+
+def _conversion_name(name: str) -> str | None:
+    wanted = name.strip().lower()
+    return next((n for n in CONVERSIONS if n.lower() == wanted), None)
+
+
+def _named_unit_plan(name: Any, prefix: Any, what: str) -> tuple[str, str, str, tuple[int, ...]]:
+    """Check one named unit before anything is made: ("si" or "conversion", its IFC name, its unit type, its dimensions)."""
+    text = _text(name, what)
+    if not text:
+        raise ValueError(f"{what} is empty: name an SI unit (such as WATT, METRE, KELVIN) or a conversion-based unit (such as foot, btu, hour, fahrenheit).")
+    prefix_text = _text(prefix, f"{what}'s prefix").upper() if prefix else ""
+    si_name = text.upper().replace(" ", "_").replace("METER", "METRE")
+    if si_name in reading.SI_SYMBOLS:
+        unit_type = _si_unit_type(si_name)
+        if unit_type is None:
+            raise ValueError(f"{text!r} is not an SI unit IFC can declare on its own.")
+        if prefix_text and prefix_text not in ifcopenshell.util.unit.prefixes:
+            raise ValueError(f"{prefix_text!r} is not an SI prefix. IFC's: {', '.join(ifcopenshell.util.unit.prefixes)}.")
+        return "si", si_name, unit_type, tuple(ifcopenshell.util.unit.si_dimensions[si_name])
+    conversion = _conversion_name(text)
+    if conversion is None:
+        raise ValueError(
+            f"{text!r} is not a unit flo2-ifc can declare. An SI unit: {', '.join(reading.SI_SYMBOLS)} (with a prefix such as MILLI or KILO);"
+            f" or one of these: {', '.join(CONVERSIONS)}."
+        )
+    if prefix_text:
+        raise ValueError(f"{conversion!r} is not an SI unit, so it takes no prefix.")
+    unit_type = ifcopenshell.util.unit.imperial_types[conversion]
+    return "conversion", conversion, unit_type, tuple(ifcopenshell.util.unit.named_dimensions[unit_type])
+
+
+def _make_named_unit(model: ifcopenshell.file, kind: str, name: str, unit_type: str, prefix: str) -> ifcopenshell.entity_instance:
+    """Make one named unit with IfcOpenShell's functions (it is not assigned to the project here)."""
+    if kind == "si":
+        unit = ifcopenshell.api.run("unit.add_si_unit", model, unit_type=unit_type, prefix=prefix or None)
+        if unit.Name != name:  # DEGREE_CELSIUS: add_si_unit names a temperature unit KELVIN
+            ifcopenshell.api.run("unit.edit_named_unit", model, unit=unit, attributes={"Name": name})
+        return unit
+    unit = ifcopenshell.api.run("unit.add_conversion_based_unit", model, name=name)
+    ifcopenshell.api.run(
+        "attribute.edit_attributes",
+        model,
+        product=unit.ConversionFactor,
+        attributes={"ValueComponent": model.create_entity("IfcReal", CONVERSIONS[name])},
+    )
+    return unit
+
+
+def add_unit(model: ifcopenshell.file, unit_type: str, unit: str = "", prefix: str = "", parts: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Declare one project unit (IfcUnitAssignment), in one call: an SI unit, a conversion-based unit, a derived unit
+    or the currency. Refuses a unit type the project already declares: every value stored in that measure is read in
+    the unit declared, so changing it is a deliberate ifc_edit (unit.unassign_unit), never a side effect."""
+    kind_of_type = _text(unit_type, "unit_type").upper().replace(" ", "")
+    if not kind_of_type.endswith("UNIT"):
+        kind_of_type += "UNIT"
+    known, _ = reading._schema_unit_types(model)
+    if kind_of_type not in known:
+        raise ValueError(f"{unit_type!r} is not a unit type of {model.schema_identifier}. For example: LENGTHUNIT, THERMODYNAMICTEMPERATUREUNIT, THERMALTRANSMITTANCEUNIT, MONETARYUNIT.")
+    if not model.by_type("IfcProject"):
+        raise ValueError("The model has no IfcProject, which is where its units are declared.")
+    existing = reading.project_unit(model, kind_of_type)
+    if existing is not None:
+        said = reading.describe_unit(model, existing)
+        raise ValueError(
+            f"The model already declares {said['of']} in {said['symbol'] or said['name']}. Every value it stores in that measure is read in it,"
+            " so it is not replaced here: to change it, remove it with ifc_edit unit.unassign_unit first, and convert the stored values."
+        )
+    derived_types = set(DERIVED_DIMENSIONS) | {t for t in known if t not in ifcopenshell.util.unit.named_dimensions and t != "MONETARYUNIT"}
+    parts = parts or []
+    checked = True
+    if kind_of_type == "MONETARYUNIT":
+        currency = _text(unit, "unit").upper()
+        if not (len(currency) == 3 and currency.isalpha()) or prefix or parts:
+            raise ValueError("A currency is declared by its ISO 4217 code in `unit` (such as USD or EUR), with no prefix and no parts.")
+
+        def build():
+            return ifcopenshell.api.run("unit.add_monetary_unit", model, currency=currency)
+
+    elif kind_of_type in derived_types:
+        if unit or prefix:
+            raise ValueError(f"{kind_of_type} is a derived unit: give its `parts`, each {{\"unit\": ..., \"exponent\": ...}}, not `unit` or `prefix`.")
+        if not isinstance(parts, list) or not parts:
+            raise ValueError(
+                f"{kind_of_type} is a derived unit: give its `parts`, e.g. for W/(m2.K) "
+                '[{"unit": "WATT"}, {"unit": "METRE", "exponent": -2}, {"unit": "KELVIN", "exponent": -1}], '
+                'or for Btu/(hr.ft2.°F) [{"unit": "btu"}, {"unit": "hour", "exponent": -1}, {"unit": "square foot", "exponent": -1}, {"unit": "fahrenheit", "exponent": -1}].'
+            )
+        plans = []
+        dims = [0] * 7
+        for i, item in enumerate(parts, 1):
+            if not isinstance(item, dict) or set(item) - {"unit", "exponent", "prefix"} or "unit" not in item:
+                raise ValueError(f"parts[{i}] must be {{\"unit\": ..., \"exponent\": ..., \"prefix\": ...}} (exponent and prefix optional), not {item!r}.")
+            exponent = item.get("exponent", 1)
+            if isinstance(exponent, bool) or not isinstance(exponent, int) or exponent == 0:
+                raise ValueError(f"parts[{i}]'s exponent must be a whole number other than 0, not {exponent!r}.")
+            kind, name, its_type, its_dims = _named_unit_plan(item["unit"], item.get("prefix", ""), f"parts[{i}]'s unit")
+            plans.append((kind, name, its_type, (item.get("prefix") or "").upper(), exponent))
+            dims = [d + exponent * e for d, e in zip(dims, its_dims, strict=True)]
+        wanted = DERIVED_DIMENSIONS.get(kind_of_type)
+        checked = wanted is not None
+        if checked and tuple(dims) != wanted:
+            raise ValueError(
+                f"Those parts do not make a {reading._label(model, kind_of_type)} unit: their dimensions (length, mass, time, current,"
+                f" temperature, amount, luminous intensity) are {tuple(dims)}, and {kind_of_type} is {wanted}."
+            )
+
+        def build():
+            made = {_make_named_unit(model, kind, name, its_type, p): exponent for kind, name, its_type, p, exponent in plans}
+            return ifcopenshell.api.run("unit.add_derived_unit", model, unit_type=kind_of_type, userdefinedtype=None, attributes=made)
+
+    else:
+        if parts:
+            raise ValueError(f"{kind_of_type} is a named unit: give it in `unit` (and `prefix`), not `parts`.")
+        kind, name, its_type, _ = _named_unit_plan(unit, prefix, "unit")
+        if its_type != kind_of_type:
+            raise ValueError(f"{name!r} is a {reading._label(model, its_type)} unit ({its_type}), not {kind_of_type}.")
+        prefix_text = (prefix or "").upper()
+
+        def build():
+            return _make_named_unit(model, kind, name, its_type, prefix_text)
+
+    def declare():
+        made = build()
+        ifcopenshell.api.run("unit.assign_unit", model, units=[made])
+        return made
+
+    made = _in_one_transaction(model, declare)
+    out: dict[str, Any] = {"declared": reading.describe_unit(model, made), "units": reading.units(model)["say"]}
+    if not checked:
+        out["dimensions_checked"] = False
+    out["check"] = "ifc_units lists it; ifc_info's property_units now gives this unit for every value of its measure that names none of its own."
+    return out
+
+
+def unit_missing_after_edit(model: ifcopenshell.file, function_path: str, params: Any) -> list[str]:
+    """After ifc_edit ran pset.edit_pset or pset.edit_qto: the values it wrote whose measure has no unit (neither the
+    property's own nor the project's), as ``Pset_WindowCommon.ThermalTransmittance (IfcThermalTransmittanceMeasure)``."""
+    if function_path not in WRITES_VALUES:
+        return []
+    try:
+        args = json.loads(params) if isinstance(params, str) else dict(params or {})
+        definition = model.by_id(int(str(args.get("pset") or args.get("qto")).lstrip("#")))
+        written = args.get("properties") or {}
+        written = json.loads(written) if isinstance(written, str) else written
+    except (ValueError, TypeError, RuntimeError, AttributeError):
+        return []
+    names = set(written) if isinstance(written, dict) else set()
+    missing = []
+    for prop in list(getattr(definition, "HasProperties", None) or []) + list(getattr(definition, "Quantities", None) or []):
+        if prop.Name in names:
+            found = reading.property_unit(model, prop)
+            if found is not None and found["from"] == "not declared":
+                missing.append(f"{definition.Name}.{prop.Name} ({found['measure']})")
+    return missing

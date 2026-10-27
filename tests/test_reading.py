@@ -73,7 +73,9 @@ def test_a_conversion_based_unit_is_named_with_its_symbol_never_a_question_mark(
     assert u["length"]["name"] == "foot" and u["length"]["symbol"] == "ft"
     assert u["length"]["si_per_unit"] == pytest.approx(0.3048)
     assert (u["area"]["symbol"], u["volume"]["symbol"]) == ("ft2", "ft3")
-    assert u["say"] == "Lengths are in feet (ft), areas in square feet and volumes in cubic feet, as the model declares them."
+    assert u["say"].startswith("Lengths are in feet (ft), areas in square feet and volumes in cubic feet, as the model declares them.")
+    # Since 0.9.0 it also says that nothing else is declared (tests/test_units.py).
+    assert "No other unit is declared" in u["say"]
     assert "?" not in u["say"]
 
 

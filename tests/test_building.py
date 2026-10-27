@@ -193,7 +193,7 @@ def test_a_gable_roof_has_two_planes_meeting_at_a_ridge_and_an_overhang():
         assert b["bottom"] == pytest.approx(2.75, abs=1e-4)
     assert min(b["min"][0] for b in boxes) == pytest.approx(-0.5, abs=1e-4)
     assert max(b["max"][1] for b in boxes) == pytest.approx(6.5, abs=1e-4)
-    covered = geometry.footprint(m, ids=",".join(str(p) for p in planes))
+    covered = geometry.footprint(m, element_ids=[str(p) for p in planes])
     assert covered["footprint"]["model"] == pytest.approx(9 * 7, rel=1e-3)
     assert covered["stacked_overlap"]["model"] == pytest.approx(0, abs=1e-3)
     assert_valid(m)
@@ -456,7 +456,7 @@ async def build_shell() -> dict:
             ids: dict[str, int] = {}
             contexts = answer(await session.call_tool("ifc_contexts", {}))
             ids["$body"] = next(c["id"] for c in contexts if c.get("context_identifier") == "Body")
-            ids["$storey"] = answer(await session.call_tool("ifc_select", {"query": 'IfcBuildingStorey, Name = "Level 1"'}))["elements"][0]["id"]
+            ids["$storey"] = answer(await session.call_tool("ifc_select", {"selector": 'IfcBuildingStorey, Name = "Level 1"'}))["elements"][0]["id"]
             old = 0
             for tool, spec in old_way_calls(seen):
                 spec = dict(spec)

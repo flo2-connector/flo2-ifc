@@ -69,7 +69,7 @@ async def drive(command: list[str], name: str, model: str) -> dict:
         r = await s.call_tool("ifc_load", {"path": f"/design/{model}"})
         assert not r.is_error, r.content
         out["load_s"] = round(time.perf_counter() - t, 2)
-        wall = await s.call_tool("ifc_select", {"query": "IfcWall", "limit": 1})
+        wall = await s.call_tool("ifc_select", {"selector": "IfcWall", "limit": 1})
         first = json.loads(wall.content[0].text)["elements"][:1]
         renders = RENDERS + ([({"view": "iso", "element_ids": [first[0]["id"]]}, "one wall picked out")] if first else [])
         for i, (args, what) in enumerate(renders):

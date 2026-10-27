@@ -54,12 +54,12 @@ def test_an_upright_wall_has_the_footprint_of_its_base(site):
 
 def test_elements_are_named_by_ids_or_global_ids(site):
     a, b = site.by_type("IfcWall")
-    by_ids = G.footprint(site, ids=f"{a.id()}, {b.id()}")
-    by_guid = G.footprint(site, ids=f"{a.GlobalId} {b.GlobalId}")
+    by_ids = G.footprint(site, element_ids=f"{a.id()}, {b.id()}")
+    by_guid = G.footprint(site, element_ids=f"{a.GlobalId} {b.GlobalId}")
     assert by_ids["footprint"] == by_guid["footprint"]
     assert by_ids["footprint"]["square_metres"] == pytest.approx(1.6)
     with pytest.raises(ValueError, match="No element has the id or GlobalId"):
-        G.footprint(site, ids="0zzzzzzzzzzzzzzzzzzzzz")
+        G.footprint(site, element_ids="0zzzzzzzzzzzzzzzzzzzzz")
 
 
 def test_a_footprint_cites_its_file_elements_unit_and_method(site, saved):
@@ -149,7 +149,7 @@ def test_height_above_a_number(site):
 
 def test_the_clear_distance_between_two_walls(site):
     a, b = ids_of(site, "IfcWall", "Wall A")[0], ids_of(site, "IfcWall", "Wall B")[0]
-    out = G.distance(site, a=str(a), b=site.by_id(b).GlobalId)
+    out = G.distance(site, element_id=a, other_element_id=site.by_id(b).GlobalId)
     assert out["clear_distance"]["model"] == pytest.approx(1800.0)
     assert out["clear_distance"]["feet_inches"] == "5' 10 7/8\""
     assert out["touching_or_overlapping"] is False
@@ -160,13 +160,13 @@ def test_the_clear_distance_between_two_walls(site):
 
 
 def test_elements_that_overlap_are_zero_apart(site):
-    out = G.distance(site, a=str(ids_of(site, "IfcSlab")[0]), b=str(ids_of(site, "IfcWall", "Wall A")[0]))
+    out = G.distance(site, element_id=str(ids_of(site, "IfcSlab")[0]), other_element_id=str(ids_of(site, "IfcWall", "Wall A")[0]))
     assert out["clear_distance"]["metres"] == 0.0 and out["touching_or_overlapping"] is True
 
 
 def test_distance_needs_one_element_each_side(site):
     with pytest.raises(ValueError, match="exactly one element"):
-        G.distance(site, a="", b="1")
+        G.distance(site, element_id="", other_element_id="1")
 
 
 def test_surface_distance_is_exact_between_skew_triangles():

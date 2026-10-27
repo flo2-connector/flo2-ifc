@@ -50,37 +50,172 @@ MAX_LIMIT = 1000
 
 # ---------------------------------------------------------------- units
 
+# WHAT A VALUE WITH NO UNIT OF ITS OWN IS IN. IFC4 ADD2 TC1, IfcPropertySingleValue.Unit: "Unit for the nominal value,
+# if not given, the default value for the measure type (given by the TYPE of nominal value) is used as defined by the
+# global unit assignment at IfcProject"; IfcPhysicalSimpleQuantity.Unit: "If no unit is given, then the global unit
+# assignment, as established at the IfcProject, applies to the quantity measures." The schema states no default
+# beyond that assignment (IfcUnitAssignment: "a set of units which may be assigned"), so a measure whose unit type
+# the project does not assign has NO unit in the model. These readers say so (`declared: false`, "not declared") and
+# never fill in SI: a U-factor stored as 1.70348 with no thermal transmittance unit is a bare number, whatever its
+# author meant (1510fc3728665dbf, fact:root-cause-a-u-factor-in-a-model-carries-no-unit-and-the-reader-reports-only-
+# length-area-volume-2026-10-26).
 
-def _unit_entry(model: ifcopenshell.file, unit_type: str) -> dict[str, Any]:
+#: The symbol of each SI unit IFC names (IfcSIUnitName), before its prefix. IfcOpenShell's own table
+#: (ifcopenshell.util.unit.unit_symbols) has seven of the thirty and answers "?" for the rest, so a U-factor's
+#: W/(m2.K) came back as "?/m2.?".
+SI_SYMBOLS = {
+    "AMPERE": "A", "BECQUEREL": "Bq", "CANDELA": "cd", "COULOMB": "C", "CUBIC_METRE": "m3", "DEGREE_CELSIUS": "°C",
+    "FARAD": "F", "GRAM": "g", "GRAY": "Gy", "HENRY": "H", "HERTZ": "Hz", "JOULE": "J", "KELVIN": "K", "LUMEN": "lm",
+    "LUX": "lx", "METRE": "m", "MOLE": "mol", "NEWTON": "N", "OHM": "Ω", "PASCAL": "Pa", "RADIAN": "rad", "SECOND": "s",
+    "SIEMENS": "S", "SIEVERT": "Sv", "SQUARE_METRE": "m2", "STERADIAN": "sr", "TESLA": "T", "VOLT": "V", "WATT": "W",
+    "WEBER": "Wb",
+}  # fmt: skip
+#: Measures whose unit type IFC spells otherwise than their name: IfcThermalConductivityMeasure is in
+#: THERMALCONDUCTANCEUNIT (W/(m.K)), IfcSectionalAreaIntegralMeasure in SECTIONAREAINTEGRALUNIT.
+_MEASURE_UNIT_TYPES = {
+    "IfcThermalConductivityMeasure": "THERMALCONDUCTANCEUNIT",
+    "IfcSectionalAreaIntegralMeasure": "SECTIONAREAINTEGRALUNIT",
+    "IfcMonetaryMeasure": "MONETARYUNIT",
+}
+_schema_units: dict[str, tuple[frozenset[str], dict[str, str]]] = {}
+
+
+def _schema_unit_types(model: ifcopenshell.file) -> tuple[frozenset[str], dict[str, str]]:
+    """The model's schema's unit types (IfcUnitEnum, IfcDerivedUnitEnum and MONETARYUNIT), and each one's measure."""
+    key = model.schema_identifier
+    if key not in _schema_units:
+        schema = ifcopenshell.ifcopenshell_wrapper.schema_by_name(key)
+        types = {"MONETARYUNIT"}
+        for enum in ("IfcUnitEnum", "IfcDerivedUnitEnum"):
+            types.update(t for t in schema.declaration_by_name(enum).enumeration_items() if t != "USERDEFINED")
+        measures: dict[str, str] = {}
+        for name in sorted((d.name() for d in schema.declarations() if d.name().endswith("Measure")), key=len):
+            unit_type = _MEASURE_UNIT_TYPES.get(name) or ifcopenshell.util.unit.get_measure_unit_type(name)
+            if unit_type in types:
+                measures.setdefault(unit_type, name)  # the shortest: IfcLengthMeasure, not IfcPositiveLengthMeasure
+        _schema_units[key] = (frozenset(types), measures)
+    return _schema_units[key]
+
+
+def measure_unit_type(model: ifcopenshell.file, measure: str) -> str | None:
+    """The unit type a measure's values are in (``THERMALTRANSMITTANCEUNIT`` for IfcThermalTransmittanceMeasure), or
+    None for a value that has no unit: a label, a boolean, a count, a ratio, a number."""
+    if not measure:
+        return None
+    unit_type = _MEASURE_UNIT_TYPES.get(measure) or ifcopenshell.util.unit.get_measure_unit_type(measure)
+    return unit_type if unit_type in _schema_unit_types(model)[0] else None
+
+
+def _label(model: ifcopenshell.file, unit_type: str) -> str:
+    """A unit type in words: ``thermal transmittance`` for THERMALTRANSMITTANCEUNIT, ``money`` for MONETARYUNIT."""
+    if unit_type in ("MONETARYUNIT", "THERMODYNAMICTEMPERATUREUNIT"):
+        return "money" if unit_type == "MONETARYUNIT" else "temperature"
+    measure = _schema_unit_types(model)[1].get(unit_type)
+    if not measure:
+        return unit_type.lower()
+    words = "".join(f" {c}" if c.isupper() else c for c in measure[3 : -len("Measure")]).strip()
+    return words.lower()
+
+
+def project_unit(model: ifcopenshell.file, unit_type: str) -> ifcopenshell.entity_instance | None:
+    """The unit the project assigns to a unit type, or None when it assigns none."""
     try:
-        unit = ifcopenshell.util.unit.get_project_unit(model, unit_type)
+        if unit_type == "MONETARYUNIT":
+            assignment = ifcopenshell.util.unit.get_unit_assignment(model)
+            return next((u for u in (assignment.Units or []) if u.is_a("IfcMonetaryUnit")), None) if assignment else None
+        return ifcopenshell.util.unit.get_project_unit(model, unit_type)
     except (IndexError, AttributeError):  # no project, or a project with no units
-        unit = None
-    if unit is None:
-        return {"declared": False, "name": None, "symbol": None, "si_per_unit": None}
-    name = ifcopenshell.util.unit.get_full_unit_name(unit).lower().replace("_", " ")
-    scale = ifcopenshell.util.unit.get_unit_scale(unit) if hasattr(ifcopenshell.util.unit, "get_unit_scale") else None
-    return {"declared": True, "name": name, "symbol": _symbol(unit), "si_per_unit": scale}
+        return None
+
+
+def _unit_type_of(unit: ifcopenshell.entity_instance) -> str:
+    if unit.is_a("IfcMonetaryUnit"):
+        return "MONETARYUNIT"
+    unit_type = getattr(unit, "UnitType", None) or "USERDEFINED"
+    if unit_type == "USERDEFINED" and getattr(unit, "UserDefinedType", None):
+        return f"USERDEFINED ({unit.UserDefinedType})"
+    return unit_type
 
 
 def _symbol(unit: ifcopenshell.entity_instance) -> str | None:
-    """The unit's symbol (``mm``, ``ft``), or None when none is known: never ``?``.
+    """The unit's symbol (``mm``, ``ft``, ``W/(m2.K)``, ``USD``), or None when none is known: never ``?``.
 
     IfcOpenShell's ``get_unit_symbol`` looks a conversion-based unit up by its
     name exactly as its table spells it, and answers ``?`` otherwise. Revit
     writes ``FOOT``, ``SQUARE FOOT`` and ``CUBIC FOOT``, where the table has
     ``foot``; IFC compares these names in any case (buildingSMART's PJS001 does),
-    so a conversion-based unit is looked up here in any case too. A name no table
-    knows gives no symbol, and the reply names the unit without one.
+    so a conversion-based unit is looked up here in any case too. An SI unit
+    takes its symbol from ``SI_SYMBOLS``, and a derived unit is composed from its
+    elements'. A name no table knows gives no symbol, and the reply names the
+    unit without one.
     """
+    if unit.is_a("IfcMonetaryUnit"):
+        return str(unit.Currency) if unit.Currency else None
+    if unit.is_a("IfcDerivedUnit"):
+        return _derived_symbol(unit)
+    if unit.is_a("IfcSIUnit"):
+        base = SI_SYMBOLS.get(str(unit.Name).replace("METER", "METRE"))
+        return (ifcopenshell.util.unit.prefix_symbols.get(unit.Prefix, "") + base) if base else None
+    if unit.is_a("IfcContextDependentUnit"):
+        return unit.Name or None
+    wanted = (unit.Name or "").strip().lower()
+    return next((s for n, s in ifcopenshell.util.unit.unit_symbols.items() if n.lower() == wanted), None)
+
+
+def _derived_symbol(unit: ifcopenshell.entity_instance) -> str | None:
+    """A derived unit's symbol from its elements: ``W/(m2.K)``, ``btu/(hr.ft2.°F)``; None if any element has none."""
+    above: list[str] = []
+    below: list[str] = []
+    for element in unit.Elements or []:
+        symbol = _symbol(element.Unit)
+        if not symbol:
+            return None
+        power = abs(element.Exponent)
+        (above if element.Exponent > 0 else below).append(symbol + (str(power) if power != 1 else ""))
+    text = ".".join(above) or "1"
+    if below:
+        text += "/" + (below[0] if len(below) == 1 else "(" + ".".join(below) + ")")
+    return text
+
+
+def _name(unit: ifcopenshell.entity_instance) -> str | None:
+    if unit.is_a("IfcMonetaryUnit"):
+        return str(unit.Currency) if unit.Currency else None
+    if unit.is_a("IfcDerivedUnit"):
+        return None  # a derived unit has no name in IFC, only its elements; its symbol says it
+    return ifcopenshell.util.unit.get_full_unit_name(unit).lower().replace("_", " ")
+
+
+def _si_per_unit(unit: ifcopenshell.entity_instance) -> float | None:
+    if unit.is_a("IfcMonetaryUnit") or unit.is_a("IfcContextDependentUnit"):
+        return None
     try:
-        symbol = ifcopenshell.util.unit.get_unit_symbol(unit)
-    except Exception:  # an unusual conversion-based unit
-        symbol = None
-    if (not symbol or "?" in symbol) and unit.is_a("IfcConversionBasedUnit"):
-        wanted = (unit.Name or "").strip().lower()
-        symbol = next((s for n, s in ifcopenshell.util.unit.unit_symbols.items() if n.lower() == wanted), None)
-    return symbol if symbol and "?" not in symbol else None
+        return ifcopenshell.util.unit.get_unit_scale(unit)
+    except Exception:  # noqa: BLE001 - an unusual unit: its scale is unknown, and the reply says so (None)
+        return None
+
+
+def describe_unit(model: ifcopenshell.file, unit: ifcopenshell.entity_instance) -> dict[str, Any]:
+    """One unit as the replies give it: its type, IFC class, name, symbol and how many SI units one of it is."""
+    unit_type = _unit_type_of(unit)
+    out = {
+        "unit_type": unit_type,
+        "of": _label(model, unit_type),
+        "kind": unit.is_a(),
+        "name": _name(unit),
+        "symbol": _symbol(unit),
+        "si_per_unit": _si_per_unit(unit),
+    }
+    if unit.is_a("IfcConversionBasedUnitWithOffset"):
+        out["si_offset"] = unit.ConversionOffset
+    return out
+
+
+def _unit_entry(model: ifcopenshell.file, unit_type: str) -> dict[str, Any]:
+    unit = project_unit(model, unit_type)
+    if unit is None:
+        return {"declared": False, "name": None, "symbol": None, "si_per_unit": None}
+    return {"declared": True, "name": _name(unit), "symbol": _symbol(unit), "si_per_unit": _si_per_unit(unit)}
 
 
 def _plural(name: str | None) -> str | None:
@@ -89,26 +224,135 @@ def _plural(name: str | None) -> str | None:
     return name if name.endswith(("s", "feet")) else ("feet" if name == "foot" else name.replace("foot", "feet") if name.endswith("foot") else name + "s")
 
 
-def units(model: ifcopenshell.file) -> dict[str, Any]:
-    """The length, area and volume units the model declares (its IfcUnitAssignment).
+def _in_words(model: ifcopenshell.file, described: dict[str, Any]) -> str:
+    name, symbol = described["name"], described["symbol"]
+    if described["kind"] == "IfcMonetaryUnit" or not name:
+        what = symbol or "an unnamed unit"
+    else:
+        named = {"fahrenheit": "degrees Fahrenheit", "degree celsius": "degrees Celsius"}.get(name) or _plural(name)
+        what = f"{named} ({symbol})" if symbol else named
+    return f"{described['of']} in {what}"
 
-    Each has its ``name`` (``millimetre``), ``symbol`` (``mm``) and
-    ``si_per_unit``: how many metres, square metres or cubic metres one of it
-    is (0.001 for a millimetre). A unit the model does not declare says
-    ``declared: false``. Lengths, areas and volumes the model STORES (its
-    quantity sets, its placements, a storey's elevation) are in these units.
+
+def units(model: ifcopenshell.file) -> dict[str, Any]:
+    """Every unit the model declares (its IfcUnitAssignment), and the length, area and volume units by name.
+
+    ``length``, ``area`` and ``volume`` each have their ``name`` (``millimetre``), ``symbol`` (``mm``) and
+    ``si_per_unit``: how many metres, square metres or cubic metres one of it is (0.001 for a millimetre); one the
+    model does not declare says ``declared: false``. Lengths, areas and volumes the model STORES (its quantity sets,
+    its placements, a storey's elevation) are in these units.
+
+    ``declared`` lists EVERY unit the assignment holds, of any kind: SI units, conversion-based units (a foot, a
+    degree), derived units (a U-factor's W/(m2.K) or Btu/(hr.ft2.°F)) and the currency, each with its ``unit_type``,
+    what it measures (``of``), its IFC class (``kind``), ``name``, ``symbol`` and ``si_per_unit`` (IfcOpenShell's
+    scale to the SI unit IFC names, so a mass's is in grams). A measure whose unit
+    type is not in it has no unit in this model (the comment above says why), and ``say`` says so.
     """
-    out = {k: _unit_entry(model, t) for k, t in (("length", "LENGTHUNIT"), ("area", "AREAUNIT"), ("volume", "VOLUMEUNIT"))}
+    out: dict[str, Any] = {k: _unit_entry(model, t) for k, t in (("length", "LENGTHUNIT"), ("area", "AREAUNIT"), ("volume", "VOLUMEUNIT"))}
+    try:
+        assignment = ifcopenshell.util.unit.get_unit_assignment(model)
+    except (IndexError, AttributeError):  # no project
+        assignment = None
+    declared = [describe_unit(model, u) for u in ((assignment.Units or []) if assignment else [])]
+    out["declared"] = declared
     length = out["length"]
     if length["declared"]:
         symbol = f" ({length['symbol']})" if length["symbol"] else ""
-        out["say"] = (
+        say = (
             f"Lengths are in {_plural(length['name'])}{symbol}, areas in {_plural(out['area']['name']) or 'undeclared units'}"
             f" and volumes in {_plural(out['volume']['name']) or 'undeclared units'}, as the model declares them."
         )
     else:
-        out["say"] = "The model declares no length unit; read its numbers as unit-less and say so."
+        say = "The model declares no length unit; read its numbers as unit-less and say so."
+    others = [d for d in declared if d["unit_type"] not in ("LENGTHUNIT", "AREAUNIT", "VOLUMEUNIT")]
+    if others:
+        say += " It also declares " + ", ".join(_in_words(model, d) for d in others) + "."
+    kinds = {d["unit_type"] for d in declared}
+    examples = [e for t, e in (("THERMALTRANSMITTANCEUNIT", "a U-factor"), ("THERMODYNAMICTEMPERATUREUNIT", "a temperature"), ("MONETARYUNIT", "a price")) if t not in kinds]
+    say += (
+        f" No other unit is declared: a value of any other measure{' (' + ', '.join(examples) + ')' if examples else ''} has no unit"
+        " unless its own property names one (ifc_info's property_units); say so, never assume SI."
+    )
+    out["say"] = say
     return out
+
+
+def _measure_of(prop: ifcopenshell.entity_instance) -> str | None:
+    """The IFC measure type of a property's or quantity's value (IfcThermalTransmittanceMeasure), or None."""
+    if prop.is_a("IfcPhysicalSimpleQuantity"):
+        return prop.declaration.attribute_by_index(3).type_of_attribute().declared_type().name()
+    value = None
+    if prop.is_a("IfcPropertySingleValue"):
+        value = prop.NominalValue
+    elif prop.is_a("IfcPropertyBoundedValue"):
+        value = prop.UpperBoundValue or prop.LowerBoundValue or getattr(prop, "SetPointValue", None)
+    elif prop.is_a("IfcPropertyEnumeratedValue"):
+        value = next(iter(prop.EnumerationValues or ()), None)
+    elif prop.is_a("IfcPropertyListValue"):
+        value = next(iter(prop.ListValues or ()), None)
+    return value.is_a() if value is not None and hasattr(value, "is_a") else None
+
+
+def _own_unit(prop: ifcopenshell.entity_instance) -> ifcopenshell.entity_instance | None:
+    if prop.is_a("IfcPropertyEnumeratedValue"):
+        reference = prop.EnumerationReference
+        return reference.Unit if reference is not None else None
+    return getattr(prop, "Unit", None)
+
+
+def property_unit(model: ifcopenshell.file, prop: ifcopenshell.entity_instance) -> dict[str, Any] | None:
+    """A property's or quantity's measure type and the unit its value is in, or None for a value with no unit type.
+
+    ``unit`` is its symbol (or name); ``from`` says where it comes from: ``property`` (the property names its own
+    unit), ``project`` (the project's unit for that measure) or ``not declared`` (neither: the value is a bare
+    number, ``unit`` is None)."""
+    measure = _measure_of(prop)
+    unit_type = measure_unit_type(model, measure) if measure else None
+    if unit_type is None:
+        return None
+    unit, source = _own_unit(prop), "property"
+    if unit is None:
+        unit, source = project_unit(model, unit_type), "project"
+    if unit is None:
+        return {"measure": measure, "unit": None, "from": "not declared"}
+    return {"measure": measure, "unit": _symbol(unit) or _name(unit), "from": source}
+
+
+def property_units(model: ifcopenshell.file, element: ifcopenshell.entity_instance) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Each measured property and quantity of an element (its own and its type's): its measure type and unit.
+
+    Returns them by property set, as ``property_sets`` lists them, and the ones whose unit is not declared
+    (``Pset_WindowCommon.ThermalTransmittance (IfcThermalTransmittanceMeasure)``). A property whose value has no unit
+    type (a label, a boolean, a count, a ratio) is left out."""
+    out: dict[str, dict[str, Any]] = {}
+    undeclared: list[str] = []
+    try:
+        psets = ifcopenshell.util.element.get_psets(element, verbose=True)
+    except Exception:  # noqa: BLE001 - as ifcquery's info: an element without property sets
+        return out, undeclared
+    for pset_name, props in psets.items():
+        for prop_name, value in props.items():
+            if not isinstance(value, dict) or "id" not in value:
+                continue
+            try:
+                found = property_unit(model, model.by_id(value["id"]))
+            except RuntimeError:
+                continue
+            if found is None:
+                continue
+            out.setdefault(pset_name, {})[prop_name] = found
+            if found["from"] == "not declared":
+                undeclared.append(f"{pset_name}.{prop_name} ({found['measure']})")
+    return out, undeclared
+
+
+def say_undeclared(model: ifcopenshell.file, undeclared: list[str]) -> str:
+    """One sentence naming the measured values whose unit the model does not declare (at most five)."""
+    named = ", ".join(undeclared[:5]) + (f" and {len(undeclared) - 5} more" if len(undeclared) > 5 else "")
+    return (
+        f"NO UNIT DECLARED for {named}: the model assigns no unit to that measure and the property names none, so the"
+        " value is a bare number; say so, do not assume SI. ifc_add_unit declares the unit (property_units says each)."
+    )
 
 
 def unit_scale(model: ifcopenshell.file) -> float:
@@ -137,14 +381,26 @@ def feet_and_inches(metres: float) -> str:
 # ---------------------------------------------------------------- storeys
 
 
-def element(model: ifcopenshell.file, element_id: int) -> ifcopenshell.entity_instance:
-    """The element with this id, or a refusal that says it is not there."""
+def element(model: ifcopenshell.file, element_id: int | str) -> ifcopenshell.entity_instance:
+    """The element with this id, or a refusal that says it is not there.
+
+    ``element_id`` is its step id (``1611``, ``"1611"`` or ``"#1611"``) or its GlobalId (``"2N1qx4tVn5RQ7hPZbG0Kd8"``):
+    every tool that names one element takes either (since 0.9.0)."""
+    text = str(element_id).strip().lstrip("#")
+    if text.isdigit():
+        try:
+            found = model.by_id(int(text))
+        except RuntimeError:
+            found = None
+        if found is None:
+            raise ValueError(f"Element #{text} not found.")
+        return found
     try:
-        found = model.by_id(int(element_id))
+        found = model.by_guid(text) if text else None
     except RuntimeError:
         found = None
     if found is None:
-        raise ValueError(f"Element #{element_id} not found.")
+        raise ValueError(f"No element has the id or GlobalId {str(element_id)!r}.")
     return found
 
 
@@ -453,8 +709,14 @@ def _is_class(model: ifcopenshell.file, item: dict[str, Any], element_type: str)
 
 
 def info_extra(model: ifcopenshell.file, element: ifcopenshell.entity_instance) -> dict[str, Any]:
-    """What ifc_info adds to ifcquery's answer: the storey, the other storeys it is referenced into, and the units."""
-    extra: dict[str, Any] = {"units": units(model)["say"]}
+    """What ifc_info adds to ifcquery's answer: the storey, the other storeys it is referenced into, the units, and
+    each measured property's measure type and unit (``property_units``, since 0.9.0), naming in ``units`` any whose
+    unit the model does not declare."""
+    say = units(model)["say"]
+    by_pset, undeclared = property_units(model, element)
+    extra: dict[str, Any] = {"units": say + (" " + say_undeclared(model, undeclared) if undeclared else "")}
+    if by_pset:
+        extra["property_units"] = by_pset
     if element.is_a("IfcProduct"):
         found = storey_of(element)
         extra["storey"] = found if found else None
@@ -565,7 +827,7 @@ def extent(
     budget = SECONDS if seconds is None else seconds
     if element_id:
         targets = [element(model, element_id)]
-        asked = f"#{element_id}"
+        asked = f"#{targets[0].id()}"
     elif selector.strip():
         targets = sorted(ifcopenshell.util.selector.filter_elements(model, selector), key=lambda e: e.id())
         asked = selector

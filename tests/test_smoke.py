@@ -48,17 +48,19 @@ EXPECTED_TOOLS = {
     "ifc_check_ids", "ifc_write_ids", "ifc_check_rules",
     # since 0.6.0: the building steps, one call an element (src/flo2_ifc/building.py)
     "ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space",
+    # since 0.9.0: a unit declared, so a value written in it carries it (src/flo2_ifc/building.py)
+    "ifc_add_unit",
 }
 
 #: The optional arguments flo2-ifc's readers add to ifcmcp's tools.
 ADDED_ARGUMENTS = {
     "ifc_tree": {"storey", "element_type", "offset", "limit"},
-    "ifc_select": {"query", "offset", "limit"},
+    "ifc_select": {"selector", "offset", "limit"},
     "ifc_relations": {"element_id", "traverse", "element_type", "offset", "limit"},
     "ifc_validate": {"express_rules", "start"},
     "ifc_extent": {"selector", "element_id", "offset", "limit", "datum"},
-    "ifc_footprint": {"selector", "ids", "element_id", "offset", "limit"},
-    "ifc_volume": {"selector", "ids", "element_id", "offset", "limit"},
+    "ifc_footprint": {"selector", "element_ids", "element_id", "offset", "limit"},
+    "ifc_volume": {"selector", "element_ids", "element_id", "offset", "limit"},
     "ifc_check_ids": {"ids_path", "report_path", "start", "offset", "limit"},
     "ifc_write_ids": {"description", "output_path"},
     "ifc_check_rules": {"rule_sets", "start", "offset", "limit"},
@@ -66,6 +68,7 @@ ADDED_ARGUMENTS = {
     "ifc_add_slab": {"storey", "footprint", "thickness", "top_offset", "kind", "name", "realizes", "frame"},
     "ifc_add_roof": {"storey", "footprint", "kind", "eave_height", "slope", "thickness", "overhang", "name", "realizes", "frame"},
     "ifc_add_space": {"storey", "footprint", "height", "floor_offset", "name", "long_name", "realizes", "frame"},
+    "ifc_add_unit": {"unit_type", "unit", "prefix", "parts"},
 }
 
 #: The arguments each building step requires.
@@ -74,6 +77,7 @@ BUILD_REQUIRED = {
     "ifc_add_slab": {"storey", "footprint", "thickness"},
     "ifc_add_roof": {"storey", "footprint", "kind", "eave_height", "slope", "thickness"},
     "ifc_add_space": {"storey", "footprint", "height"},
+    "ifc_add_unit": {"unit_type"},
 }
 
 #: An IDS the smoke test writes and checks the house against: its spaces store
@@ -144,9 +148,9 @@ async def round_trip() -> dict:
             out["load"] = text_of(await session.call_tool("ifc_load", {"path": house}))
             out["units"] = json.loads(text_of(await session.call_tool("ifc_units", {})))
             out["tree"] = json.loads(text_of(await session.call_tool("ifc_tree", {"limit": 2})))
-            out["doors"] = json.loads(text_of(await session.call_tool("ifc_select", {"query": 'IfcDoor, location = "FIRST"'})))
+            out["doors"] = json.loads(text_of(await session.call_tool("ifc_select", {"selector": 'IfcDoor, location = "FIRST"'})))
             out["roof"] = json.loads(text_of(await session.call_tool("ifc_extent", {"selector": "IfcRoof"})))
-            spaces = json.loads(text_of(await session.call_tool("ifc_select", {"query": "IfcSpace"})))
+            spaces = json.loads(text_of(await session.call_tool("ifc_select", {"selector": "IfcSpace"})))
             out["room"] = json.loads(text_of(await session.call_tool("ifc_info", {"element_id": spaces["elements"][0]["id"]})))
             out["checked"] = json.loads(text_of(await session.call_tool("ifc_validate", {})))
             out["footprint"] = json.loads(text_of(await session.call_tool("ifc_footprint", {"selector": "IfcWall"})))
@@ -183,10 +187,10 @@ def test_initialize_names_the_server_and_gives_instructions(served):
     assert served["instructions"] and "ifc_load" in served["instructions"]
 
 
-def test_list_tools_gives_ifcmcps_25_tools_and_flo2_ifcs_thirteen(served):
+def test_list_tools_gives_ifcmcps_25_tools_and_flo2_ifcs_fourteen(served):
     names = served["tools"]
-    assert len(names) == 38, names
-    assert len(set(names)) == 38, names
+    assert len(names) == 39, names
+    assert len(set(names)) == 39, names
     assert set(names) == EXPECTED_TOOLS
     for name in ("ifc_load", "ifc_summary", "ifc_edit", "ifc_plot", "ifc_render"):
         assert name in names
@@ -198,7 +202,7 @@ def test_the_readers_take_their_paging_and_filter_arguments(served):
         assert props == wanted, (tool, props)
         required = set(served["schemas"][tool].get("required", []))
         own = {"ifc_check_ids": {"ids_path"}, "ifc_write_ids": {"description", "output_path"}, **BUILD_REQUIRED}.get(tool, set())
-        assert required <= ({"query", "element_id"} | own) - ({"element_id"} if tool in ("ifc_extent", "ifc_footprint", "ifc_volume") else set()), (tool, required)
+        assert required <= ({"selector", "element_id"} | own) - ({"element_id"} if tool in ("ifc_extent", "ifc_footprint", "ifc_volume") else set()), (tool, required)
 
 
 def test_a_millimetre_house_reads_whole_through_the_server(served):

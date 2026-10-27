@@ -37,7 +37,7 @@ A large building model read through flo2 (2026-10-23) showed five problems. A ch
 | `ifc_info` on a room | no storey (a room is part of its storey, not contained in it) | adds `storey`, found through containment or aggregation, with the path; since 0.8.1, `referenced_into`, the other storeys an element spanning storeys is referenced into |
 | `ifc_validate` | over 100 s, one call | checks as much as one call allows (30 s), says `complete` and `next_start`; the schema's rules run in a forked child that is stopped at the call's time |
 | (none) | no way to say how high the roof is | `ifc_extent`: bounding boxes from the geometry, in the model's unit, metres, and feet and inches |
-| (none) | replies said lengths were "usually metres" | `ifc_units`, and `units` in every reply that carries a length, area or volume |
+| (none) | replies said lengths were "usually metres"; until 0.9.0 a U-factor came back as a bare number | `ifc_units` (since 0.9.0 EVERY unit the model declares: SI, conversion-based, derived and its currency), `units` in every reply that carries a length, area or volume (since 0.9.0 also the other units declared, and that a measure with none has no unit), and in `ifc_info`, since 0.9.0, each measured property's measure type and unit (`property_units`) |
 
 `src/flo2_ifc/server.py` reads every tool ifcmcp's own server defines, takes its one session, and serves them on its
 own server, with seven of them replaced by the readers in `src/flo2_ifc/reading.py`. Each replacement keeps its name
@@ -258,6 +258,53 @@ shell through the server (4 walls, two with sloped tops, a slab, a shed roof wit
 and the same shell the old way in 57; the new one validates with express rules and passes buildingSMART's normative
 rules.
 
+## Units (since 0.9.0)
+
+A designer read a window's U-factor, `Pset_WindowCommon` `ThermalTransmittance` 1.70348, with no unit: the model
+declared none for thermal transmittance, flo2-ifc's readers named only lengths, areas and volumes, and every reply
+said only those had units (flo2-ifc's design 1510fc3728665dbf,
+`fact:root-cause-a-u-factor-in-a-model-carries-no-unit-and-the-reader-reports-only-length-area-volume-2026-10-26`).
+IFC4 says a property with no unit of its own is in "the global unit assignment at IfcProject", and states no default
+beyond it, so a measure the project assigns no unit to has none. Now:
+
+- `ifc_units` lists every unit the assignment holds (`declared`), each with its unit type, what it measures, its IFC
+  class, name, symbol (W/(m2.K), btu/(hr.ft2.°F), USD: never `?`) and how many SI units one of it is; `say`, in
+  every reply, names the other units declared and says that a value of any other measure has no unit;
+- `ifc_info` gives each measured property's and quantity's measure type and unit (`property_units`): from the
+  property's own `Unit`, the project's unit for its measure, or `"not declared"`, which `units` then names. A label,
+  a boolean, a count or a ratio has no unit type and is left out. `property_sets` is unchanged;
+- `ifc_add_unit` declares one project unit in one call, with IfcOpenShell's `unit` functions: an SI unit (WATT,
+  KELVIN, METRE with MILLI), a conversion-based one with its exact factor (foot, square foot, btu, hour, fahrenheit,
+  pound: NIST SP 811's values, where IfcOpenShell's own table rounds several and gives a degree Fahrenheit as 1.8 K),
+  a derived one from its `parts`, checked against its unit type's dimensions, or a currency. A unit type already
+  declared is refused: every value stored in it is read in it. ifcmcp's `ifc_edit` cannot declare a derived unit
+  (`unit.add_derived_unit` takes a mapping of entities, which ifcedit cannot pass);
+- `ifc_edit`'s `pset.edit_pset` and `pset.edit_qto` write a measured value only in a declared unit: one the model
+  would store with no unit is not written, and the reply says to declare it with `ifc_add_unit` first. Every other
+  edit runs as ifcmcp runs it.
+
+## One name for one thing (since 0.9.0)
+
+A designer found one element named four ways across the tools (flo2's design 1a97fc1f1de4d5d2,
+`fact:root-cause-a-helpers-describe-is-refused-because-the-client-holds-a-tool-list-without-it-2026-10-26`). The
+rule is the name most tools already used (`ARGUMENT_NAMES` in `src/flo2_ifc/server.py`): one element is
+`element_id`, several are `element_ids`, a selector is `selector`, and an IFC class the listed elements are kept to is
+`element_type`. Wherever flo2-ifc reads one element it takes its step id or its GlobalId.
+
+| Tool | Until 0.9.0 | Since 0.9.0 |
+|---|---|---|
+| `ifc_select` | `query` | `selector` |
+| `ifc_footprint`, `ifc_volume` | `ids` (text) | `element_ids` (text or a list) |
+| `ifc_distance` | `a`, `b` | `element_id`, `other_element_id` |
+| `ifc_info`, `ifc_relations`, `ifc_extent`, `ifc_footprint`, `ifc_volume` | `element_id`, an integer | `element_id`, a step id or a GlobalId |
+
+Every old name is still taken (`ALIASES`), so a caller holding an old tool list (flo2's door and its chats keep the
+list they connected with) calls the same way and is answered the same; the served schemas show only the new names.
+An old and a new name with different values is refused. Left as they are: ifcmcp's `ifc_schema` takes `entity_type`,
+the IFC class whose schema it reads, most often not an element's; ifcmcp's `ifc_clash`, `ifc_plot` and `ifc_render`
+already use these names; `ifc_draw`'s `through`, `around` and `highlight` each name a role, not which element a call
+is about.
+
 ## Where ifcmcp comes from (since 0.4.0)
 
 ifcmcp is two parts. `core.py` (`IfcSession`) is the tool code: glue over IfcOpenShell's own `ifcquery` and `ifcedit`,
@@ -405,7 +452,7 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 ## The tests and the checks
 
-`python -m pytest` runs fourteen test files:
+`python -m pytest` runs eighteen test files:
 
 - `tests/test_skill.py` holds the skill read-a-building-model to its shape: each file at most 16,000 bytes (flo2
   serves each in one reply of at most 30,000 characters), SKILL.md naming every page beside it and no other, and
@@ -413,7 +460,7 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp 2.3.0 client. It checks that:
   - the server initializes as `ifc-mcp`, with instructions;
-  - it lists ifcmcp's 25 tools and flo2-ifc's thirteen, and the readers, measures, checks and building steps take
+  - it lists ifcmcp's 25 tools and flo2-ifc's fourteen, and the readers, measures, checks and building steps take
     their arguments;
   - `ifc_new` and then `ifc_summary` both answer;
   - a synthetic millimetre house (`tests/models.py`), opened with `ifc_load`, reads whole: its units, a page of the
@@ -425,9 +472,18 @@ uv venv -p 3.12 && uv pip install '.[test]'
     OpenGL.
 - `tests/test_tool_list.py` starts it the same way and compares what it lists with flo2-ifc 0.3.1's list
   (`tests/tools-0.3.1.json`, read from 0.3.1 over stdio): the server's name and instructions, 0.3.1's 31 tools in
-  order (and only the three checks and the four building steps added since),
+  order (and only the three checks, the four building steps and `ifc_add_unit` added since),
   each one's input and output schemas, its description (by sha256, so ifcmcp's LGPL text is not copied here), and the
-  reason each of ten failing ifcmcp calls gives. A difference means the tools changed, and flo2's real-ifcmcp door
+  reason each of ten failing ifcmcp calls gives. The seven tools renamed in 0.9.0 are held instead to taking every
+  argument 0.3.1 took, under its name or as an alias, with its type and whether it is required.
+- `tests/test_units.py` (since 0.9.0) builds a window in feet with a U-factor and no thermal transmittance unit, with
+  ifcopenshell.api: every declared unit listed with its symbol, the U-factor said to have no unit, then a project
+  unit or the property's own, `ifc_add_unit` declaring W/(m2.K), Btu/(hr.ft2.°F) (5.678263 W/(m2.K)), °F, °C, a
+  pound, a kilowatt and a currency and refusing what is not a unit, and `ifc_edit` refusing to write the U-factor
+  until its unit is declared.
+- `tests/test_argument_names.py` (since 0.9.0) holds every served tool to one name for each thing, every old name to
+  being taken and answered as its new one, conflicting names to a refusal, and one element to its step id or its
+  GlobalId. A difference means the tools changed, and flo2's real-ifcmcp door
   test must change with them.
 - `tests/test_rendering.py` renders the synthetic house in 3D with `ifc_render`, in a child with no display: a
   1280 x 960 PNG on a white ground with shaded faces, a different picture from each side, a selector, and an element

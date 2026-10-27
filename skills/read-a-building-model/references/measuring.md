@@ -4,7 +4,8 @@ Part of the skill read-a-building-model; SKILL.md holds the rules this page foll
 
 The stored quantities are the exporter's. These read the elements' 3D shapes instead, and answer in the model's unit,
 in metres (square, cubic) and in feet and inches (square, cubic feet). Name the elements with a `selector` (by storey:
-`location = "Level 1"`), with `ids` (ids or GlobalIds, comma separated), or with one `element_id`.
+`location = "Level 1"`), with `element_ids` (ids or GlobalIds, comma separated), or with one `element_id` (an id or a
+GlobalId).
 
 - **Footprint:** `ifc_footprint`. Each element's footprint is its shape seen from above. The set's `footprint`
   counts what is stacked ONCE (a slab over its footings, a wall over a wall); `sum_of_elements` adds each one's own,
@@ -16,7 +17,7 @@ in metres (square, cubic) and in feet and inches (square, cubic feet). Name the 
   many were left out.
 - **Size and height above a datum:** `ifc_extent` with `"datum": "Level 1"` (a storey's level) or a height in the
   model's unit. `above_datum.top` is how high it reaches above that floor.
-- **Distance:** `ifc_distance` with `a` and `b` (each an id or GlobalId). `clear_distance` is the shortest gap
+- **Distance:** `ifc_distance` with `element_id` and `other_element_id` (each an id or GlobalId). `clear_distance` is the shortest gap
   between their surfaces (0 when they touch), with the two closest points; `box_gap` and `centre_to_centre` are
   beside it. Say which one you quote: "the clear gap between the two walls is 1.8 m (5' 10 7/8")".
 
