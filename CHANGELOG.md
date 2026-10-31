@@ -2,6 +2,21 @@
 
 flo2-ifc's versions, newest first. Versions before 0.3.1 are described in README.md, in the sections marked "since".
 
+## 0.9.1 (unreleased)
+
+A fix, no tool added or renamed, every served schema unchanged (flo2's re-pin needs no tool-list change):
+
+- **A name a reply gives an element is a name the tools take**
+  (1510fc3728665dbf, `fact:root-cause-a-reply-names-an-element-id-while-the-tools-take-element-id-2026-10-31`).
+  0.9.0 gave each thing one name in what the tools TAKE, but their replies still name an element `id` (its step id)
+  and `global_id`, and neither was taken: a chat on flo2.io read `{"id": 157952}` off `ifc_select` and was refused
+  `ifc_info {"id": 157952}`. Now every tool whose served schema takes `element_id` also takes `id` as it, and
+  `global_id` where that `element_id` takes a GlobalId (ifcmcp's `ifc_clash` takes the step id alone): aliases,
+  never served, read from each tool's own schema (`server.REPLY_NAMES`, `reply_names_taken`), so a tool added later
+  is covered without a list to keep. Guard: `tests/test_argument_names.py`. Every one-element tool takes both names
+  as its schema says, and every key in a real reply that holds an element's step id or GlobalId is a name the tools
+  take. Checked failing before the fix: `ifc_clash` ran with `id` ignored.
+
 ## 0.9.0 (unreleased)
 
 One tool is added (`ifc_add_unit`, 39 tools), seven tools' arguments are renamed with every old name still taken, and
