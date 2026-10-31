@@ -19,7 +19,7 @@ import json
 import anyio
 import pytest
 
-from flo2_ifc.server import ALIASES, ARGUMENT_NAMES, build_server, canonical_arguments
+from flo2_ifc.server import ALIASES, ARGUMENT_NAMES, REPLY_NAMES, build_server, canonical_arguments, reply_names_taken
 from tests import models
 
 #: Names that would name one of ARGUMENT_NAMES's things another way.
@@ -136,3 +136,107 @@ def test_one_element_is_named_by_its_step_id_or_its_global_id(served):
     assert call(server, "ifc_relations", {"element_id": a_guid})
     assert call(server, "ifc_extent", {"element_id": a_guid})["overall"] == call(server, "ifc_extent", {"element_id": a})["overall"]
     assert "No element has the id or GlobalId" in call(server, "ifc_info", {"element_id": "0zzzzzzzzzzzzzzzzzzzzz"})
+
+
+# ── A name a reply gives an element is a name the tools take (since 0.9.1) ────────────────────────────────────────
+#
+# 0.9.0 gave each thing one name in what the tools TAKE; their replies still name an element `id` (its step id) and
+# `global_id`. A chat on flo2.io read {"id": 157952} off ifc_select and was refused ifc_info {"id": 157952}
+# (1510fc3728665dbf, fact:root-cause-a-reply-names-an-element-id-while-the-tools-take-element-id-2026-10-31). So every
+# name a reply gives one element is taken wherever one element is (`element_id`), and these tests hold the round trip.
+
+#: The names a reply may give one element (server.REPLY_NAMES, and `element_id` itself); anything else naming one is a
+#: name the tools do not take.
+ACCEPTED_FOR_ONE_ELEMENT = {"element_id", *REPLY_NAMES}
+
+
+def _one_element_tools(tools):
+    return sorted(t for t, schema in tools.items() if "element_id" in schema.get("properties", {}))
+
+
+def test_every_name_a_reply_gives_an_element_is_taken_wherever_one_element_is(served):
+    server, tools, walls = served
+    a, a_guid = walls["Wall A"]
+    one = _one_element_tools(tools)
+    assert {"ifc_info", "ifc_relations", "ifc_extent", "ifc_distance"} <= set(one), one
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    async def disagree(tool, name):
+        # Taken as `element_id` before the arguments are checked: shown by the refusal of two names that disagree,
+        # which needs none of the tool's other arguments.
+        with pytest.raises(ToolError, match="give `element_id` only"):
+            await server.call_tool(tool, {name: a, "element_id": a + 1})
+
+    assert set(REPLY_NAMES) == {"id", "global_id"}, REPLY_NAMES
+    for tool in one:
+        names = reply_names_taken(tools[tool])
+        assert "id" in names, tool
+        for name in names:
+            anyio.run(disagree, tool, name)
+    # A GlobalId goes only where `element_id` takes one: ifcmcp's ifc_clash takes the step id alone.
+    assert reply_names_taken(tools["ifc_clash"]) == ("id",)
+    assert reply_names_taken(tools["ifc_info"]) == REPLY_NAMES
+    for tool in ("ifc_info", "ifc_relations", "ifc_extent"):
+        by_name = _strip(call(server, tool, {"element_id": a}))
+        assert _strip(call(server, tool, {"id": a})) == by_name, tool
+        assert _strip(call(server, tool, {"global_id": a_guid})) == _strip(call(server, tool, {"element_id": a_guid})), tool
+
+
+def _element_like(node):
+    kind = node.get("type", node.get("class"))
+    return isinstance(kind, str) and kind.startswith("Ifc")
+
+
+def _names_for_elements(answer, model):
+    """Every key that holds an element's step id or GlobalId, in a dict that describes an element."""
+    found = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            if _element_like(node):
+                for key, value in node.items():
+                    if isinstance(value, bool):
+                        continue
+                    if isinstance(value, int):
+                        try:
+                            if model.by_id(value).is_a() == node.get("type", node.get("class")):
+                                found.add(key)
+                        except RuntimeError:
+                            pass
+                    elif isinstance(value, str) and len(value) == 22:
+                        try:
+                            model.by_guid(value)
+                            found.add(key)
+                        except RuntimeError:
+                            pass
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(answer)
+    return found
+
+
+def test_a_reply_names_an_element_only_by_names_the_tools_take(served, tmp_path):
+    import ifcopenshell
+
+    server, _, walls = served
+    a, _ = walls["Wall A"]
+    path = tmp_path / "site.ifc"
+    models.measured_site().write(str(path))
+    model = ifcopenshell.open(str(path))
+    answers = {
+        "ifc_select": call(server, "ifc_select", {"selector": "IfcWall"}),
+        "ifc_tree": call(server, "ifc_tree", {}),
+        "ifc_info": call(server, "ifc_info", {"element_id": a}),
+        "ifc_relations": call(server, "ifc_relations", {"element_id": a}),
+    }
+    seen = set()
+    for tool, answer in answers.items():
+        assert isinstance(answer, dict), (tool, answer)
+        names = _names_for_elements(answer, model)
+        assert names <= ACCEPTED_FOR_ONE_ELEMENT, f"{tool} names an element {sorted(names - ACCEPTED_FOR_ONE_ELEMENT)}, which no tool takes"
+        seen |= names
+    assert "id" in seen, "the walk found no element named in any reply: it would pass for the wrong reason"

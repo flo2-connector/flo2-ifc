@@ -38,7 +38,9 @@ Since 0.9.0 every unit a model declares is read, and each measured property's
 unit (reading.py, "WHAT A VALUE WITH NO UNIT OF ITS OWN IS IN"); ifc_edit's
 property writes are held to a declared unit (``_hold_units``); and every tool
 names what it is about one way (``ARGUMENT_NAMES``), taking each old name as an
-alias (``ALIASES``, applied before a call's arguments are checked).
+alias (``ALIASES``, applied before a call's arguments are checked); and since
+0.9.1 the names a reply gives an element (``REPLY_NAMES``: ``id``, and
+``global_id`` where ``element_id`` takes a GlobalId) wherever a tool takes one.
 
 Every tool, ifcmcp's and flo2-ifc's, is registered through one catch
 (``_reason_kept``): a failure reaches the agent as a ToolError with its own
@@ -111,12 +113,39 @@ ALIASES = {
     "ifc_volume": {"ids": "element_ids"},
     "ifc_distance": {"a": "element_id", "b": "other_element_id"},
 }
+#: The names a reply gives one element: its step id and its GlobalId (reading.py, building.py, checking.py,
+#: drawing.py). A chat reads one off one tool's answer and passes it to the next, so wherever a tool takes one element
+#: (`element_id`), `id` is taken too, and `global_id` where that `element_id` also takes text (a GlobalId): as
+#: aliases, never served. Both are read from each tool's own served schema, not listed here (1510fc3728665dbf,
+#: fact:root-cause-a-reply-names-an-element-id-while-the-tools-take-element-id-2026-10-31).
+REPLY_NAMES = ("id", "global_id")
 
 
-def canonical_arguments(tool: str, arguments: dict[str, Any] | None) -> dict[str, Any]:
-    """`arguments` with every old name (ALIASES) given its new one. Both names with different values is refused."""
+def _takes_text(prop: dict[str, Any]) -> bool:
+    """Whether a served argument's JSON Schema takes a string (its `type`, or any `anyOf` branch's)."""
+    kinds = prop.get("type")
+    branches = [kinds] if isinstance(kinds, str) else list(kinds or [])
+    branches += [b.get("type") for b in prop.get("anyOf", []) if isinstance(b, dict)]
+    return "string" in branches
+
+
+def reply_names_taken(schema: dict[str, Any] | None) -> tuple[str, ...]:
+    """The names in REPLY_NAMES a tool with this input schema takes as its `element_id`: none when it takes no one
+    element; `id`; and `global_id` too when its `element_id` takes a GlobalId."""
+    prop = (schema or {}).get("properties", {}).get("element_id")
+    if prop is None:
+        return ()
+    return REPLY_NAMES if _takes_text(prop) else ("id",)
+
+
+def canonical_arguments(tool: str, arguments: dict[str, Any] | None, reply_names: tuple[str, ...] = ()) -> dict[str, Any]:
+    """`arguments` with every old name (ALIASES) given its new one, and each name a reply gives one element that this
+    tool takes (`reply_names`, from reply_names_taken) given `element_id`. Two names with different values are refused."""
     arguments = dict(arguments or {})
-    for old, new in ALIASES.get(tool, {}).items():
+    renames = dict(ALIASES.get(tool, {}))
+    for name in reply_names:
+        renames.setdefault(name, "element_id")
+    for old, new in renames.items():
         if old in arguments:
             value = arguments.pop(old)
             if new in arguments and arguments[new] != value:
@@ -282,11 +311,17 @@ def build_server() -> Any:
     from mcp.server.mcpserver.exceptions import ToolError
 
     class Server(MCPServer):
-        """MCPServer, taking each tool's old argument names (ALIASES) as its new ones."""
+        """MCPServer, taking each tool's old argument names (ALIASES) as its new ones, and the names a reply gives an
+        element (REPLY_NAMES) wherever a tool takes one."""
+
+        reply_names: dict[str, tuple[str, ...]] | None = None
 
         async def call_tool(self, name, arguments, context=None):
+            if self.reply_names is None:
+                # From the served schemas, once: what each tool that takes `element_id` takes it as, ifcmcp's and ours.
+                self.reply_names = {t.name: reply_names_taken(t.input_schema) for t in await self.list_tools()}
             try:
-                arguments = canonical_arguments(name, arguments)
+                arguments = canonical_arguments(name, arguments, self.reply_names.get(name, ()))
             except ValueError as e:
                 raise ToolError(str(e)) from e
             return await super().call_tool(name, arguments, context)
