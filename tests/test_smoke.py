@@ -50,6 +50,8 @@ EXPECTED_TOOLS = {
     "ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space",
     # since 0.9.0: a unit declared, so a value written in it carries it (src/flo2_ifc/building.py)
     "ifc_add_unit",
+    # since 0.10.0: what changed between two models (IfcDiff) and a BCF 3.0 file of it (src/flo2_ifc/diffing.py, bcf_writing.py)
+    "ifc_diff", "ifc_write_bcf",
 }
 
 #: The optional arguments flo2-ifc's readers add to ifcmcp's tools.
@@ -69,6 +71,8 @@ ADDED_ARGUMENTS = {
     "ifc_add_roof": {"storey", "footprint", "kind", "eave_height", "slope", "thickness", "overhang", "name", "realizes", "frame"},
     "ifc_add_space": {"storey", "footprint", "height", "floor_offset", "name", "long_name", "realizes", "frame"},
     "ifc_add_unit": {"unit_type", "unit", "prefix", "parts"},
+    "ifc_diff": {"other_path", "output_path", "other_is", "compare", "selector", "offset", "limit"},
+    "ifc_write_bcf": {"description", "output_path"},
 }
 
 #: The arguments each building step requires.
@@ -111,11 +115,17 @@ def text_of(result) -> str:
 
 
 def write_house() -> str:
-    """The synthetic house, written where the server can open it; its path as the server sees it."""
+    """The synthetic house, written where the server can open it, and beside it house-after.ifc, the same house
+    with its first wall renamed (for ifc_diff); the house's path as the server sees it."""
+    import ifcopenshell
+
     from tests import models
 
     folder = os.environ.get("FLO2_IFC_DESIGN_DIR") or tempfile.mkdtemp(prefix="flo2-ifc-smoke-")
     models.building(walls=3).write(str(Path(folder) / "house.ifc"))
+    after = ifcopenshell.open(str(Path(folder) / "house.ifc"))
+    min(after.by_type("IfcWall"), key=lambda w: w.Name).Name = "Kitchen wall"
+    after.write(str(Path(folder) / "house-after.ifc"))
     seen_as = os.environ.get("FLO2_IFC_DESIGN_SEEN_AS") or folder
     return f"{seen_as}/house.ifc"
 
@@ -155,6 +165,12 @@ async def round_trip() -> dict:
             out["checked"] = json.loads(text_of(await session.call_tool("ifc_validate", {})))
             out["footprint"] = json.loads(text_of(await session.call_tool("ifc_footprint", {"selector": "IfcWall"})))
             out["volume"] = json.loads(text_of(await session.call_tool("ifc_volume", {"selector": "IfcWall"})))
+            # Since 0.10.0: what changed between the house and its edited copy (IfcDiff, in a forked child whose
+            # prints must not reach this stream), kept as JSON, and a BCF 3.0 file of it, both where the image can write.
+            out["diff"] = json.loads(text_of(await session.call_tool("ifc_diff", {"other_path": house.replace("house.ifc", "house-after.ifc"), "output_path": f"{tempfile.gettempdir()}/flo2-ifc-smoke-diff"})))
+            renamed = out["diff"]["changed"][0]["global_id"] if out["diff"].get("changed") else "2O2Fr$t4X7Zf8NOew3FNr2"
+            bcf = {"project": "Smoke test", "topics": [{"title": "A wall renamed", "description": "Renamed in the smoke test.", "topic_type": "Request", "topic_status": "Open", "author": "smoke@example.com", "components": [renamed], "files": ["house.ifc"]}]}
+            out["bcf"] = json.loads(text_of(await session.call_tool("ifc_write_bcf", {"description": json.dumps(bcf), "output_path": f"{tempfile.gettempdir()}/flo2-ifc-smoke-changes"})))
             # Written where the confined image can write: its /tmp, as flo2's slot gives it an outbox.
             out["draw"] = json.loads(text_of(await session.call_tool("ifc_draw", {"output_path": f"{tempfile.gettempdir()}/flo2-ifc-smoke-plan", "storey": "GROUND"})))
             # An IDS written, then the house checked against it, then buildingSMART's rules.
@@ -187,10 +203,10 @@ def test_initialize_names_the_server_and_gives_instructions(served):
     assert served["instructions"] and "ifc_load" in served["instructions"]
 
 
-def test_list_tools_gives_ifcmcps_25_tools_and_flo2_ifcs_fourteen(served):
+def test_list_tools_gives_ifcmcps_25_tools_and_flo2_ifcs_sixteen(served):
     names = served["tools"]
-    assert len(names) == 39, names
-    assert len(set(names)) == 39, names
+    assert len(names) == 41, names
+    assert len(set(names)) == 41, names
     assert set(names) == EXPECTED_TOOLS
     for name in ("ifc_load", "ifc_summary", "ifc_edit", "ifc_plot", "ifc_render"):
         assert name in names
@@ -201,7 +217,8 @@ def test_the_readers_take_their_paging_and_filter_arguments(served):
         props = set(served["schemas"][tool].get("properties", {}))
         assert props == wanted, (tool, props)
         required = set(served["schemas"][tool].get("required", []))
-        own = {"ifc_check_ids": {"ids_path"}, "ifc_write_ids": {"description", "output_path"}, **BUILD_REQUIRED}.get(tool, set())
+        own = {"ifc_check_ids": {"ids_path"}, "ifc_write_ids": {"description", "output_path"}, "ifc_diff": {"other_path", "output_path"},
+               "ifc_write_bcf": {"description", "output_path"}, **BUILD_REQUIRED}.get(tool, set())
         assert required <= ({"selector", "element_id"} | own) - ({"element_id"} if tool in ("ifc_extent", "ifc_footprint", "ifc_volume") else set()), (tool, required)
 
 
@@ -262,6 +279,17 @@ def test_an_ids_is_written_and_the_house_checked_against_it_through_the_server(s
     assert checked["reports"]["html"].endswith(".html") and checked["reports"]["json"].endswith(".json")
     is_error, text = served["bad_ids"]
     assert is_error and "at least one specification" in text, text
+
+
+def test_what_changed_is_compared_and_written_as_bcf_through_the_server(served):
+    diff = served["diff"]
+    assert diff["complete"] is True and diff["counts"]["changed"] == 1 and diff["counts"]["added"] == diff["counts"]["deleted"] == 0, diff
+    assert diff["changed"][0]["attributes"] == {"Name": {"before": "Wall 000", "after": "Kitchen wall"}}
+    assert diff["written"].endswith("flo2-ifc-smoke-diff.json") and len(diff["sha256"]) == 64
+    assert diff["before"]["file"] == "house.ifc" and diff["after"]["file"] == "house-after.ifc"
+    bcf = served["bcf"]
+    assert bcf["valid"] is True and bcf["bcf_version"] == "3.0" and bcf["written"].endswith("flo2-ifc-smoke-changes.bcf"), bcf
+    assert bcf["topics"][0]["components"] == 1 and bcf["topics"][0]["camera"].startswith("aimed at its elements")
 
 
 def test_buildingsmarts_rules_run_through_the_server(served):

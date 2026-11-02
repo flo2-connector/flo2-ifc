@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Measure the image's peak memory while it renders, for the broker's cap.
+"""Measure the image's peak memory while it renders, or compares two models, for the broker's cap.
 
     python3 tools/measure.py --model path/to/model.ifc [--model ...] [--image flo2-ifc:local] [--cap 1g]
+    python3 tools/measure.py --model before.ifc --diff after.ifc [--compare attributes,property] [--seconds 30]
 
 For each model, starts ONE container of the image under flo2-tool-sandbox's
 flags (no network, a read-only root, a 64 MB /tmp, user 65534, no
@@ -19,6 +20,13 @@ JSON line per model. Needs docker, the image, the mcp client (pip install
 
 ifcquery's renderer draws one size of picture, 1280 x 960, so the size that
 moves the peak is the model's: its shapes, and the triangles they make.
+
+With --diff (since 0.10.0), the session opens the model and compares it with
+the other model (in the same folder) with ifc_diff, as flo2's door step
+ifc_diff does, writing the comparison into /tmp (in flo2, the outbox; both are
+tmpfs, charged to the cap), and nothing is rendered. --seconds sets the call's
+time (FLO2_IFC_SECONDS, 30 by default, as flo2 runs it); a larger one measures
+how high a comparison that would not finish in one call climbs.
 """
 
 from __future__ import annotations
@@ -44,7 +52,7 @@ RENDERS = [
 ]
 
 
-async def drive(command: list[str], name: str, model: str) -> dict:
+async def drive(command: list[str], name: str, model: str, other: str | None = None, compare: str = "") -> dict:
     params = StdioServerParameters(command=command[0], args=command[1:])
     out: dict = {"renders": []}
     async with stdio_client(params) as (read, write), ClientSession(read, write) as s:
@@ -69,9 +77,24 @@ async def drive(command: list[str], name: str, model: str) -> dict:
         r = await s.call_tool("ifc_load", {"path": f"/design/{model}"})
         assert not r.is_error, r.content
         out["load_s"] = round(time.perf_counter() - t, 2)
-        wall = await s.call_tool("ifc_select", {"selector": "IfcWall", "limit": 1})
-        first = json.loads(wall.content[0].text)["elements"][:1]
-        renders = RENDERS + ([({"view": "iso", "element_ids": [first[0]["id"]]}, "one wall picked out")] if first else [])
+        if other is not None:
+            out.pop("renders")
+            t = time.perf_counter()
+            r = await s.call_tool("ifc_diff", {"other_path": f"/design/{other}", "output_path": "/tmp/diff", **({"compare": compare} if compare else {})})
+            said = "".join(getattr(b, "text", "") for b in r.content)
+            out["diff"] = {"s": round(time.perf_counter() - t, 2), "ok": not r.is_error}
+            if r.is_error:
+                out["diff"]["error"] = said[:400]
+            else:
+                answer = json.loads(said)
+                out["diff"].update({"counts": answer["counts"], "compare": answer["options"]["compare"], "file_bytes": answer["bytes"], "seconds": answer["seconds"]})
+            renders = []
+        else:
+            renders = None
+        if renders is None:
+            wall = await s.call_tool("ifc_select", {"selector": "IfcWall", "limit": 1})
+            first = json.loads(wall.content[0].text)["elements"][:1]
+            renders = RENDERS + ([({"view": "iso", "element_ids": [first[0]["id"]]}, "one wall picked out")] if first else [])
         for i, (args, what) in enumerate(renders):
             t = time.perf_counter()
             r = await s.call_tool("ifc_render", {**args, "output_path": f"/tmp/render-{i}.png"})
@@ -94,19 +117,34 @@ def main() -> None:
     ap.add_argument("--image", default="flo2-ifc:local")
     ap.add_argument("--cap", default="1g")
     ap.add_argument("--model", action="append", required=True)
+    ap.add_argument("--diff", help="compare each --model with this model (in the same folder) instead of rendering")
+    ap.add_argument("--compare", default="", help="ifc_diff's compare (default: all it compares)")
+    ap.add_argument("--seconds", type=float, help="the call's time, FLO2_IFC_SECONDS (default: the image's, 30)")
+    ap.add_argument("--env", action="append", default=[], metavar="NAME=VALUE",
+                    help="a FLO2_IFC_ setting for this run only, e.g. FLO2_IFC_DIFF_MAX_BYTES=200000000 to measure past a limit (flo2's broker passes none)")
     a = ap.parse_args()
     for model in a.model:
         path = Path(model).resolve()
+        other = Path(a.diff).resolve() if a.diff else None
+        if other is not None and other.parent != path.parent:
+            ap.error("--diff names a model in the same folder as --model: the folder is what is mounted at /design")
         name = f"flo2-ifc-measure-{uuid.uuid4().hex[:8]}"
+        extra = ["-e", f"FLO2_IFC_SECONDS={a.seconds:g}"] if a.seconds else []
+        for setting in a.env:
+            if not setting.startswith("FLO2_IFC_") or "=" not in setting:
+                ap.error(f"--env takes FLO2_IFC_NAME=VALUE, not {setting!r}")
+            extra += ["-e", setting]
         command = [
             "docker", "run", "--rm", "-i", "--name", name, "--network", "none", "--read-only",
             "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m", "--memory", a.cap, "--memory-swap", a.cap,
             "--cpus", "1", "--pids-limit", "64", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-            "--user", "65534:65534", "--mount", f"type=bind,source={path.parent},target=/design,readonly", a.image,
+            "--user", "65534:65534", "--mount", f"type=bind,source={path.parent},target=/design,readonly", *extra, a.image,
         ]
         started = time.perf_counter()
-        result = anyio.run(drive, command, name, path.name)
-        print(json.dumps({"image": a.image, "cap": a.cap, "model": path.name, "bytes": path.stat().st_size,
+        result = anyio.run(drive, command, name, path.name, other.name if other else None, a.compare)
+        print(json.dumps({"image": a.image, "cap": a.cap, **({"env": [*([f"FLO2_IFC_SECONDS={a.seconds:g}"] if a.seconds else []), *a.env]} if extra else {}),
+                          "model": path.name, "bytes": path.stat().st_size,
+                          **({"other": other.name, "other_bytes": other.stat().st_size} if other else {}),
                           "seconds": round(time.perf_counter() - started, 1), **result}), flush=True)
 
 

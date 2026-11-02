@@ -25,11 +25,13 @@ It holds the exact set flo2.io installs to run IfcOpenShell's ifcmcp:
 
 Its one piece of server code is a thin layer: `flo2_ifc.server.build_server` serves every tool ifcmcp's own server
 defines on flo2-ifc's own `MCPServer` (MCP Python SDK 2.x), then replaces seven of them (`ifc_summary`, `ifc_tree`, `ifc_select`, `ifc_info`, `ifc_relations`, `ifc_validate`,
-`ifc_quantify`) with readers that page, filter, keep to one call's time and name the model's units, and adds fourteen
+`ifc_quantify`) with readers that page, filter, keep to one call's time and name the model's units, and adds sixteen
 (`ifc_extent`, `ifc_units`; since 0.3.0 the measures `ifc_footprint`, `ifc_volume`, `ifc_distance` and the drawing
 `ifc_draw`; since 0.5.0 the checks `ifc_check_ids`, `ifc_write_ids` and `ifc_check_rules`; since 0.6.0 the building
-steps `ifc_add_wall`, `ifc_add_slab`, `ifc_add_roof` and `ifc_add_space`; since 0.9.0 `ifc_add_unit`). README.md, "The readers for a whole
-building", "Measures and drawings", "Checks" and "Building steps", says why each one exists. It
+steps `ifc_add_wall`, `ifc_add_slab`, `ifc_add_roof` and `ifc_add_space`; since 0.9.0 `ifc_add_unit`; since 0.10.0
+`ifc_diff` and `ifc_write_bcf`, what changed between two models with IfcDiff and a BCF 3.0 file of it). README.md, "The readers for a whole
+building", "Measures and drawings", "Checks", "Building steps" and "What changed between two models", says why each
+one exists. It
 also watches the session's editing methods (`_watch_changes`), so a measure says when the copy was edited and a kept
 mesh is never drawn after an edit. Keep it thin:
 
@@ -47,7 +49,11 @@ mesh is never drawn after an edit. Keep it thin:
 - every limit (characters, seconds, the geometry library and batch) is an environment setting with a measured default;
 - tests use synthetic models (`tests/models.py`), never a person's model;
 - a check runs IfcOpenShell's or buildingSMART's own code (ifctester, the gherkin rules), never a checker of our own,
-  and an IDS is built with ifctester's API, never written as XML by hand.
+  and an IDS is built with ifctester's API, never written as XML by hand;
+- a comparison is IfcDiff's (since 0.10.0): flo2-ifc only chooses its options, asks it so a model fits one call, and
+  says the change in words (diffing.py says what, and the two fixes it makes to IfcDiff's comparisons, each IfcDiff's
+  own intent); a BCF file is built with bcf-client, never written as XML by hand, and checked against buildingSMART's
+  BCF 3.0 schemas, which ship unchanged in `src/flo2_ifc/schemas/bcf-3.0` (CC BY-ND 4.0: never edit them).
 
 **Where ifcmcp comes from (since 0.4.0).** ifcmcp's tool code comes from upstream's own release on PyPI,
 `ifcopenshell-mcp`, pinned exactly and **without** its `[mcp]` extra (which requires mcp<2). Its `core.py` never imports
@@ -83,7 +89,8 @@ Every MCP server Anthony runs carries all three. Keep them true here:
 - **pyvista and VTK only for `ifc_render`** (since 0.7.0, when flo2's door began to offer it: flo2's design
   1a97fc1f1de4d5d2, `dec:a-chat-renders-a-building-model-in-3d`). They add about 890 MB to the image (660 MB to
   1.55 GB). The image draws with Mesa's EGL on the CPU (llvmpipe), with no display; nothing else may need OpenGL.
-  `tools/measure.py` measures a render's peak memory in flo2's container shape, and flo2's broker sets its cap from it.
+  `tools/measure.py` measures a render's peak memory in flo2's container shape, and flo2's broker sets its cap from it;
+  since 0.10.0 `--diff` measures a comparison's, and `diffing.MAX_BYTES` is set from it.
 - **The image is confined from outside.** flo2's sandbox runs it with:
   - `--network none`;
   - `--read-only`;
@@ -111,11 +118,12 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp client. It checks:
   - the server's name and instructions;
-  - ifcmcp's 25 tools and flo2-ifc's fourteen, with the readers', measures', checks' and building steps' arguments;
+  - ifcmcp's 25 tools and flo2-ifc's sixteen, with the readers', measures', checks', building steps' and comparison's arguments;
   - that `ifc_new` and then `ifc_summary` both answer;
   - that a synthetic millimetre house reads whole through the readers, and is measured and drawn (a PNG through
     cairo, so the image's cairo library and fonts are checked too), and rendered in 3D with `ifc_render` (so the
-    image's off-screen OpenGL is checked too).
+    image's off-screen OpenGL is checked too), and compared with an edited copy with `ifc_diff` and a BCF 3.0 file
+    written of it with `ifc_write_bcf` (since 0.10.0).
 
   Set `FLO2_IFC_SERVER` to a command line, such as a `docker run` of the image, to ask a different server the same
   questions.
@@ -141,6 +149,9 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
   listed, the U-factor said to have none, `ifc_add_unit` declaring units and refusing what is not one, and `ifc_edit`
   refusing to write the U-factor until its unit is declared.
 - `tests/test_argument_names.py` holds every tool to one name for each thing, and every old name to still working.
+- `tests/test_diffing.py` and `tests/test_bcf.py` (since 0.10.0) compare a synthetic house with an edited copy (the
+  exact GlobalIds added, deleted and changed, what changed on each, the kept JSON, every refusal with nothing
+  written), and write a BCF 3.0 file that opens again with bcf-client and is valid against buildingSMART's schemas.
 - `tests/test_manifests.py` validates the Agent Plugins manifests against the schemas in `tests/schemas/`, and checks
   that both formats agree.
 - `tests/test_dependency_currency.py` tests the dependency check against fake registry data. It makes no network calls.
@@ -174,13 +185,15 @@ python3 tools/dependency_currency.py
 | `src/flo2_ifc/geometry.py` | the meshes (kept per session), footprints, volumes and closedness, distances, and `cite` |
 | `src/flo2_ifc/drawing.py` | plans, sections and elevations to scale, as SVG and PNG |
 | `src/flo2_ifc/checking.py` | the IDS check and the IDS writer, with ifctester |
+| `src/flo2_ifc/diffing.py` | what changed between two models, with IfcDiff, in a forked child, kept whole as JSON (since 0.10.0) |
+| `src/flo2_ifc/bcf_writing.py`, `src/flo2_ifc/schemas/bcf-3.0/` | a BCF 3.0 file with bcf-client, checked against buildingSMART's BCF 3.0 schemas, which ship there unchanged (since 0.10.0) |
 | `src/flo2_ifc/rules.py`, `rules_formatter.py` | buildingSMART's validation rules, run with behave in a child stopped at the call's time |
 | `tools/ifc_rules.py` | the rules' pin (release, commits, sha256s) and their install, which the image's build stage runs |
 | `Dockerfile`, `.dockerignore` | the image flo2.io builds |
 | `plugin.json`, `mcp.json` | the plugin, Agent Plugins format |
 | `.claude-plugin/plugin.json`, `.mcp.json` | the plugin, Claude Code format |
 | `tools/dependency_currency.py`, `dependency-holds.toml` | the monthly dependency check, and its holds |
-| `tools/measure.py` | a session's peak memory while it renders, in flo2's container shape, for the broker's cap |
+| `tools/measure.py` | a session's peak memory while it renders or compares two models (`--diff`), in flo2's container shape, for the broker's cap and the comparison's size limit |
 | `skills/read-a-building-model/` | the skill a chat reads (since 0.7.0): its rules in `SKILL.md`, its recipes in `references/` (each named by SKILL.md), among them `starting-a-model.md`, the starting model a chat copies; flo2 serves the whole folder unchanged, and `tests/test_skill.py` holds each file to 16,000 bytes. A new feature adds a page or grows one, never the whole skill |
 | `tests/` | the smoke, tool-list, reader, starting-model, manifest and dependency-check tests, the synthetic models, 0.3.1's tool list, and the vendored schemas |
 | `.github/workflows/ci.yml` | tests on Python 3.12, and the image built and run as flo2 confines it |

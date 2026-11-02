@@ -30,3 +30,9 @@ kind = "package"
 name = "pyspellchecker"
 reason = "buildingSMART's validation rules (tools/ifc_rules.py, v1.0.5) pin 0.8.3 in their requirements.txt; it moves with the rules' release."
 look_again = 2026-12-01
+
+[[hold]]
+kind = "package"
+name = "cachebox"
+reason = "deepdiff 9.1.0, which IfcDiff (ifcdiff 0.9.0) compares with, requires cachebox>=5.2,<6; it moves when a deepdiff release admits 6."
+look_again = 2026-12-01
