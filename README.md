@@ -7,8 +7,8 @@ building model. It is published on PyPI as `ifcopenshell-mcp` and licensed LGPL-
 The repository holds seven things:
 
 - the pinned set, in `pyproject.toml`;
-- the readers for a whole building, the measures and drawings, and the checks (IDS and buildingSMART's rules), in
-  `src/flo2_ifc/` (below);
+- the readers for a whole building, the measures and drawings, the checks (IDS and buildingSMART's rules), and the
+  record of what changed between two models (IfcDiff and BCF 3.0), in `src/flo2_ifc/` (below);
 - the skill a chat reads to work with a building model, `skills/read-a-building-model/` (since 0.7.0; until then
   flo2 wrote it): its rules in `SKILL.md`, and its recipes in pages beside it, `references/`, which SKILL.md names
   and flo2 serves unchanged. One of them, `references/starting-a-model.md` (since 0.5.1; below, "Starting a model
@@ -23,7 +23,8 @@ one thin layer, **the readers for a whole building**, because a real building di
 since 0.3.0 **measures and drawings to scale** on the same layer. Since 0.4.0 **the server is flo2-ifc's own**, on the
 MCP Python SDK 2.x, serving ifcmcp's tools from upstream's published `ifcopenshell-mcp` rather than from a fork
 (below, "Where ifcmcp comes from"). Since 0.5.0 it **checks a model against an IDS and against buildingSMART's
-validation rules, and writes an IDS** (below, "Checks").
+validation rules, and writes an IDS** (below, "Checks"). Since 0.10.0 it **records what changed between two models**,
+with IfcOpenShell's IfcDiff and a BCF 3.0 file (below, "What changed between two models").
 
 ## The readers for a whole building (since 0.2.0)
 
@@ -305,6 +306,72 @@ the IFC class whose schema it reads, most often not an element's; ifcmcp's `ifc_
 already use these names; `ifc_draw`'s `through`, `around` and `highlight` each name a role, not which element a call
 is about.
 
+## What changed between two models, and a BCF file of it (since 0.10.0)
+
+A person changes a model and wants the change written down in openBIM's own form (flo2's design 1a97fc1f1de4d5d2,
+`req:a-chat-records-what-changed-between-two-building-models-as-an-ifcdiff-and-a-bcf-file`). Two tools do it, with
+IfcOpenShell's own code, never a differ or a BCF writer of flo2-ifc's:
+
+| Tool | What it does |
+|---|---|
+| `ifc_diff` | compares the model open in the session with another model file (`other_path`; the one after, or before with `other_is`) with **IfcDiff** (IfcOpenShell's `ifcdiff`): every element added, deleted and changed, by GlobalId, IFC class and name; what changed on each; and the counts by class. The whole comparison is written as `<output_path>.json`, with IfcDiff's own report in it (`ifcdiff`); the reply lists 50 of each list (`offset`, `limit`) and says what it withheld. |
+| `ifc_write_bcf` | writes a **BCF 3.0** file (buildingSMART's BIM Collaboration Format) with **bcf-client** (IfcOpenShell's BCF library): the project, and topics, each with its title, description, type, status, labels, author, comments, the elements it is about (selected, and optionally coloured, in its viewpoint, by GlobalId), a camera (given in metres, or aimed by bcf-client's own camera at the elements in the open model), a snapshot picture, and the model files its header names (with the open model's IfcProject). Written as `<output_path>.bcf`. Needs no model. |
+
+**What IfcDiff is asked, and why** (`src/flo2_ifc/diffing.py`). IfcDiff compares by GlobalId every `IfcElement` and
+spatial element (openings left out). flo2-ifc runs it with:
+
+- `relationships`: everything it compares: attributes, properties, type, container, aggregate, classification, and
+  geometry. Its own default is attributes and geometry only, which says nothing of a changed fire rating or a wall
+  moved to another storey, the changes a person most often makes. Plus `placement`, IfcDiff's quick geometry check
+  (`diff_element_basic_geometry`: the placement moved or turned, the openings changed), which IfcDiff has and does
+  not run: its full geometry check takes only elements with a "Body" shape in a model view, and on the public
+  Clinic_Architectural sample it missed three of the ten elements changed (measured 2026-11-02).
+- `is_shallow=False`, so an element renamed AND moved says both; and each relationship asked separately, because
+  IfcDiff stops at the first that differs.
+- **The shapes only where they fit.** IfcDiff's full geometry check makes every shape of both models. Two models over
+  8 MiB together (`FLO2_IFC_DIFF_GEOMETRY_MAX_BYTES`) compare placements instead, and say so (`note_geometry`); a call
+  that asks for `geometry` there is refused unless `selector` narrows it. Measured: the public AC20-FZK-Haus pair (5.0
+  MB together) took 10.7 s with shapes; a 49.8 MB pair (the public rac_basic_sample_project) ran for minutes and past
+  850 MB on a laptop.
+- What a chat needs to say a change, added to IfcDiff's report: which attributes changed, with their values before
+  and after; where a changed placement moved to, in the model's length unit.
+- **Two fixes to IfcDiff 0.9.0's comparisons, each IfcDiff's own intent.** A property set's STEP id is left out: its
+  `exclude_regex_paths=[r".*id$"]` matches no path DeepDiff 9 writes (`root['Pset_X']['id']` ends in `']`), so
+  without it every property set of another export of the same model reads as changed
+  (`tests/test_diffing.py`, a model renumbered). And an element whose plain attributes or property sets are equal in
+  both models is not handed to DeepDiff, which finds nothing there and took 25 of 30 s on a 13 MB model.
+
+**Memory and time: measured, then refused up front** (`tools/measure.py --diff`, one container under flo2's broker
+flags: no network, a read-only root, a 64 MB /tmp, user 65534, one CPU, 64 processes, `--memory 1152m` with no swap;
+Intel N95; one session opening the model before and comparing it with an edited copy, made with IfcOpenShell's API:
+five walls renamed, three elements moved, two deleted, one added, two given a property set). The comparison runs in a
+forked child, stopped at the call's time (30 s), so a child the cap stops leaves the session and its model alive.
+
+| Public sample (each model) | Entities | Compared | Peak (memory.peak) | Anonymous | Time |
+|---|---|---|---|---|---|
+| AC20-FZK-Haus, 2.6 MB (KIT) | 44,249 | with shapes | 276 MiB | 188 MiB | 10.7 s |
+| Duplex_A_20110907, 2.4 MB (buildingSMART) | 38,898 | with shapes | 157 MiB | 144 MiB | 0.8 s |
+| Clinic_Architectural, 13.0 MB (buildingSMART) | 209,259 | placements | 295 MiB | 264 MiB | 12.4 s |
+| ifc4rac_basic_sample_project, 25.4 MB (opensourceBIM) | 496,141 | placements | 461 MiB | 424 MiB | 2.8 s |
+| Clinic_HVAC, 26.9 MB (buildingSMART) | 455,957 | placements | 492 MiB | 431 MiB | 18.7 s |
+| Duplex_Plumbing_20121113, 31.6 MB (buildingSMART) | 566,909 | placements | 564 MiB | 469 MiB | 4.8 s |
+| Schependomlaan, 49.3 MB (buildingSMART) | 784,962 | placements | 758 MiB | 659 MiB | 18.3 s |
+
+No memory event and no kill in any; at most 7 of the 64 processes. The peak grows by about 6.5 MiB for each MB of
+the two files together. So two models over **100 MB together** (`FLO2_IFC_DIFF_MAX_BYTES`, just over the largest
+pair measured) are refused before either is opened, in plain words; two ~31 MB models (62.5 MB together) fit at
+564 MiB. A session that has already made meshes (a measure, a drawing) holds them too, on top of these.
+
+**The BCF file is checked before it is kept** (`src/flo2_ifc/bcf_writing.py`). bcf-client writes it; then every part
+(bcf.version, project.bcfp, extensions.xml, each topic's markup.bcf and viewpoint) is checked against
+**buildingSMART's BCF 3.0 XML schemas**, with xmlschema and no network, and the file is opened again with bcf-client
+and must hold the topics, components and comments it was given. bcf-client ships no schemas, so the seven are in this
+package (`src/flo2_ifc/schemas/bcf-3.0/`), copied unchanged from github.com/buildingSMART/BCF-XML at tag `v3.0`,
+each held to its sha256 by `tests/test_bcf.py`; they are licensed CC BY-ND 4.0 (shared verbatim, with attribution:
+the folder's README.md). `extensions.xml` lists every topic type, status, label, priority, stage and user the topics
+use, as BCF 3.0 asks. Limits (each an environment setting): 100 topics a file, 2,000 elements a topic and 20,000 in
+all, 50 comments and 20 labels a topic, an 8 MiB snapshot.
+
 ## Where ifcmcp comes from (since 0.4.0)
 
 ifcmcp is two parts. `core.py` (`IfcSession`) is the tool code: glue over IfcOpenShell's own `ifcquery` and `ifcedit`,
@@ -344,9 +411,10 @@ checked when the server starts, which then fails loudly, and the exact pin and t
 
 ```
 flo2-ifc                this repository: pins, image, plugin, CI, dependency check, the server on mcp 2.x,
-  │                     the readers for a whole building, the measures and the drawings, the checks
-  │                     (7 tools replaced, 9 added)
+  │                     the readers for a whole building, the measures and the drawings, the checks,
+  │                     what changed between two models (7 tools replaced, 16 added)
   ├─ ifctester          IfcOpenShell's IDS checker and IDS API, from PyPI
+  ├─ ifcdiff, bcf       IfcOpenShell's IfcDiff and BCF library (bcf-client), from PyPI, with buildingSMART's BCF 3.0 schemas
   ├─ ifc-gherkin-rules  buildingSMART's validation rules, at the release tools/ifc_rules.py pins, run with behave
   └─ ifcmcp             ifcmcp's tool code (25 tools), from ifcopenshell-mcp 0.9.0 on PyPI
        └─ ifcquery, ifcedit (and ifc5d)   the helpers ifcmcp calls into
@@ -370,6 +438,9 @@ Every dependency is pinned exactly in `pyproject.toml`. That list is the set flo
 | `shapely==2.2.0` | flo2-ifc's footprints and drawings join projected triangles with it. ifcopenshell 0.9.0 requires it, unpinned; flo2-ifc imports it itself, so it is pinned at the version that resolves. |
 | `pyvista==0.49.1`, `vtk==9.7.1` | `ifc_render` (since 0.7.0). ifcquery imports pyvista if it can and fails the tool otherwise; pyvista draws with VTK, which decides how a picture is drawn with no display. Their own dependencies (matplotlib, pillow, pooch, scooby, cyclopts) are transitive. They take the image from 660 MB to 1.55 GB (VTK's libraries are 565 MB, Mesa's LLVM 124 MB). |
 | `cairosvg==2.9.1` | `ifc_draw` renders its SVG to PNG with it. It loads the cairo library at run time: the image installs Debian's `libcairo2`, and `fonts-dejavu-core` for the words. Its own dependencies (cairocffi, cssselect2, tinycss2, defusedxml, pillow) are transitive. |
+| `ifcdiff==0.9.0` | `ifc_diff` (since 0.10.0): IfcOpenShell's own IfcDiff. LGPL-3.0-or-later. |
+| `deepdiff==9.1.0`, `orderly-set==5.5.0`, `cachebox==5.2.3` | ifcdiff leaves them unpinned, and they decide what it reports: deepdiff compares attributes and property sets and records a property change, orderly-set is the set ifcdiff imports from it, cachebox is deepdiff's cache. All MIT. |
+| `bcf-client==0.9.0`, `xsdata==26.10` | `ifc_write_bcf` (since 0.10.0): IfcOpenShell's own BCF library, and the XML binding its BCF 3.0 model is generated with, which decides what the file says. bcf-client's source files and upstream's `src/bcf/pyproject.toml` say LGPL-3.0-or-later; the 0.9.0 wheel's PyPI classifier still says GPLv3. xsdata is MIT. |
 | `ifctester==0.9.0` | `ifc_check_ids` and `ifc_write_ids`: IfcOpenShell's own IDS checker, reporters and IDS API, with the IDS 1.0 XSD. The image removes its browser web app (`ifctester/webapp/www`, 32 MB), which nothing here serves. |
 | `xmlschema==4.3.2`, `elementpath==5.1.4` | ifctester leaves them unpinned, and they decide what an IDS says and matches: xmlschema reads an IDS and checks it against the XSD (offline: it carries the W3C schemas the XSD imports), and elementpath turns an IDS pattern into the regular expression a value is matched with. |
 | `behave==1.2.6`, `python-dotenv==1.1.1`, `rtree==1.4.0`, `pyproj==3.7.1`, `mpmath==1.3.0`, `pydot==4.0.1`, `pyspellchecker==0.8.3` | What buildingSMART's rules import when they run, at the versions their `requirements.txt` pins (v1.0.5). |
@@ -380,9 +451,9 @@ Every dependency is pinned exactly in `pyproject.toml`. That list is the set flo
 
 Some things are deliberately left out:
 
-- **ifctester's other helpers** (flask, bcf-client, odfpy, pystache, python-dateutil). ifctester requires them, so
-  they are installed, unpinned: they serve its web app and its BCF, ODS and HTML reports, and decide nothing a check
-  says. **bcf-client is GPL-3.0**; flo2-ifc's own code never imports it.
+- **ifctester's other helpers** (flask, odfpy, pystache, python-dateutil). ifctester requires them, so they are
+  installed, unpinned: they serve its web app and its ODS and HTML reports, and decide nothing a check says.
+  bcf-client, once among them, is pinned above since 0.10.0, when `ifc_write_bcf` began to import it.
 - **Transitive dependencies** (pillow and the rest). They are not pinned: each comes in at whatever
   version the pinned packages accept. `pip freeze --all` in the image build and in CI shows what was installed.
 
@@ -452,7 +523,7 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 ## The tests and the checks
 
-`python -m pytest` runs eighteen test files:
+`python -m pytest` runs twenty test files:
 
 - `tests/test_skill.py` holds the skill read-a-building-model to its shape: each file at most 16,000 bytes (flo2
   serves each in one reply of at most 30,000 characters), SKILL.md naming every page beside it and no other, and
@@ -460,8 +531,8 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp 2.3.0 client. It checks that:
   - the server initializes as `ifc-mcp`, with instructions;
-  - it lists ifcmcp's 25 tools and flo2-ifc's fourteen, and the readers, measures, checks and building steps take
-    their arguments;
+  - it lists ifcmcp's 25 tools and flo2-ifc's sixteen, and the readers, measures, checks, building steps and the
+    record of what changed take their arguments;
   - `ifc_new` and then `ifc_summary` both answer;
   - a synthetic millimetre house (`tests/models.py`), opened with `ifc_load`, reads whole: its units, a page of the
     tree, doors by storey, the roof's top, a room's storey, and a complete validation; and it is measured and drawn
@@ -469,10 +540,11 @@ uv venv -p 3.12 && uv pip install '.[test]'
     written and the house checked against it (one specification passes, one fails, both reports are written), an
     empty IDS is refused, and buildingSMART's critical and informal-proposition rules run on it; and a wall is built
     on it in one call (`ifc_add_wall`), in each frame; and it is rendered in 3D (`ifc_render`), which checks the image's off-screen
-    OpenGL.
+    OpenGL; and it is compared with an edited copy (`ifc_diff`, a forked child whose prints must not reach the MCP
+    stream) and a BCF 3.0 file written of the change (`ifc_write_bcf`).
 - `tests/test_tool_list.py` starts it the same way and compares what it lists with flo2-ifc 0.3.1's list
   (`tests/tools-0.3.1.json`, read from 0.3.1 over stdio): the server's name and instructions, 0.3.1's 31 tools in
-  order (and only the three checks, the four building steps and `ifc_add_unit` added since),
+  order (and only the three checks, the four building steps, `ifc_add_unit`, `ifc_diff` and `ifc_write_bcf` added since),
   each one's input and output schemas, its description (by sha256, so ifcmcp's LGPL text is not copied here), and the
   reason each of ten failing ifcmcp calls gives. The seven tools renamed in 0.9.0 are held instead to taking every
   argument 0.3.1 took, under its name or as an alias, with its type and whether it is required.
@@ -509,6 +581,17 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
   If `FLO2_IFC_SERVER` is set to a command line, the test starts that command instead. CI uses this to ask the built
   image the same questions, under flo2's flags.
+- `tests/test_diffing.py` (since 0.10.0) compares a synthetic house with an edited copy (a wall renamed, one given a
+  fire rating, one moved, the door deleted, a column added): the exact GlobalIds added, deleted and changed and what
+  changed on each, the counts by class, the kept JSON with IfcDiff's own report, the other model before, `compare`
+  and `selector`, a renumbered copy reading unchanged, two large models comparing placements, paging, nothing
+  printed to stdout, and every refusal with nothing written (no second model, not IFC, an unknown comparison, too
+  large for memory, out of time, the same file).
+- `tests/test_bcf.py` (since 0.10.0) writes a BCF 3.0 file and opens it again with bcf-client: the project, every
+  topic's title, description, type, status, labels, author and comments, its components selected and coloured, its
+  camera (given, perspective and orthogonal, or aimed at its elements), its snapshot and its header's model files;
+  every part valid against buildingSMART's schemas (held to their sha256), the extensions listing what the topics
+  use, and every refusal with nothing written.
 - `tests/test_ids.py` writes an IDS for each facet type (entity, attribute, property, classification, material,
   part_of) and checks a synthetic model that passes it and one that fails it; prohibited, optional and
   required-with-nothing specifications; the reply's citations and both reports; descriptions and IDS files that are

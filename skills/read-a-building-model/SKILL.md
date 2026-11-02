@@ -1,7 +1,7 @@
 ---
 name: read-a-building-model
-description: Check a design against its building model (an IFC file) with someone who is not a modelling specialist, measure it, draw it, and change it when they ask. Use when a person asks what their model says (its storeys, rooms, a floor area, a wall's length, its materials), wants a footprint, a volume, a height or a distance measured, wants a plan, section or elevation drawn to scale or a 3D picture of it, wants a limit the design records checked against the model, wants a list of what the model must contain written down in a checkable form (an IDS) or the model checked against one, wants the model checked against buildingSMART's validation rules before it is handed over, or asks to build or change something in it (a wall, slab, roof or room; a room's name, a property, equipment placed, an opening cut), or has no model yet. It covers starting one, where to start, which numbers the model stores and in what units, measuring from the shapes and citing the number, drawing to scale and in 3D, following a measurement the design already records, how to report a comparison, writing a must-contain list as an IDS, checking a model against it and against buildingSMART's rules and reading the results, how an edit is made and kept as a new file, and recipes for shapes, positions and openings.
-compatibility: Needs IfcOpenShell's ifcmcp with flo2-ifc 0.9.0's layer, as github.com/flo2-connector/flo2-ifc builds it (in flo2, the helper "building-model"), which provides ifc_summary, ifc_units, ifc_tree, ifc_select, ifc_info, ifc_relations, ifc_extent, ifc_quantify, ifc_materials, ifc_validate, ifc_schema, the measures ifc_footprint, ifc_volume and ifc_distance, the drawing ifc_draw (in flo2, the step draw_model), the 3D picture ifc_render (in flo2, the step render_model), the checks ifc_write_ids and ifc_check_ids (in flo2, the steps write_ids and check_ids) and ifc_check_rules, for editing ifc_list, ifc_docs and ifc_edit, for shapes ifc_contexts, ifc_shape_list, ifc_shape_docs, ifc_shape and ifc_clash, the building steps ifc_add_wall, ifc_add_slab, ifc_add_roof and ifc_add_space, and ifc_add_unit.
+description: Check a design against its building model (an IFC file) with someone who is not a modelling specialist, measure it, draw it, and change it when they ask. Use when a person asks what their model says (its storeys, rooms, a floor area, a wall's length, its materials), wants a footprint, a volume, a height or a distance measured, wants a plan, section or elevation drawn to scale or a 3D picture of it, wants a limit the design records checked against the model, wants a list of what the model must contain written down in a checkable form (an IDS) or the model checked against one, wants the model checked against buildingSMART's validation rules before it is handed over, wants what changed between two models recorded (an IfcDiff and a BCF file), or asks to build or change something in it (a wall, slab, roof or room; a room's name, a property, equipment placed, an opening cut), or has no model yet. It covers starting one, where to start, which numbers the model stores and in what units, measuring from the shapes and citing the number, drawing to scale and in 3D, following a measurement the design already records, how to report a comparison, writing a must-contain list as an IDS, checking a model against it and against buildingSMART's rules and reading the results, recording what changed between two models as an IfcDiff and a BCF file, how an edit is made and kept as a new file, and recipes for shapes, positions and openings.
+compatibility: Needs IfcOpenShell's ifcmcp with flo2-ifc 0.10.0's layer, as github.com/flo2-connector/flo2-ifc builds it (in flo2, the helper "building-model"), which provides ifc_summary, ifc_units, ifc_tree, ifc_select, ifc_info, ifc_relations, ifc_extent, ifc_quantify, ifc_materials, ifc_validate, ifc_schema, the measures ifc_footprint, ifc_volume and ifc_distance, the drawing ifc_draw (in flo2, the step draw_model), the 3D picture ifc_render (in flo2, the step render_model), the checks ifc_write_ids and ifc_check_ids (in flo2, the steps write_ids and check_ids) and ifc_check_rules, ifc_diff and ifc_write_bcf (in flo2, the steps ifc_diff and write_bcf), for editing ifc_list, ifc_docs and ifc_edit, for shapes ifc_contexts, ifc_shape_list, ifc_shape_docs, ifc_shape and ifc_clash, the building steps ifc_add_wall, ifc_add_slab, ifc_add_roof and ifc_add_space, and ifc_add_unit.
 ---
 
 # Read a building model with someone
@@ -21,6 +21,7 @@ This page holds the rules. The recipes are in the pages beside it: read the one 
 | A plan, section or elevation to scale, or a 3D picture | `references/drawing.md` |
 | A list of what the model must contain (an IDS), or a check against one | `references/ids.md` |
 | buildingSMART's validation rules, before a hand-over | `references/validation-rules.md` |
+| What changed between two models, recorded as an IfcDiff and a BCF file | `references/recording-changes.md` |
 | A change they ask for, or a wall, slab, roof or room built | `references/editing.md` |
 | Equipment placed, an opening cut and filled, a type placed many times, any other shape | `references/shapes.md` |
 
@@ -88,6 +89,8 @@ On a large model, read `references/large-models.md` first: nothing is read whole
   shapes: say which items went into it and which stay measures.
 - **buildingSMART's rules** check the FILE: save an edited copy first and check the saved file. A rule named in
   `rules_not_finished` was not checked: say so.
+- **A record of what changed** is IfcDiff's comparison and a BCF file, written with the helper's steps, never by
+  hand: one topic per change the person meant, pinned to its elements by GlobalId, with their reason.
 
 ## Comparing with the design
 
@@ -123,7 +126,9 @@ shape builder take the model's OWN unit. Check with `ifc_validate` before you ke
   neither writes over a file the design keeps (a name it already keeps gets -2), and a viewer of the design cannot
   draw. An IDS is written with `write_ids` and kept as a new `.ids` file (a design need not
   keep a model for it), and `check_ids` reads an IDS the design keeps by its file name and keeps the two reports as
-  new files.
+  new files. `ifc_diff` compares the open model with another the design keeps (`other`, by its file name) and keeps
+  the comparison as a new `.json` file; `write_bcf` keeps a BCF 3.0 file, its snapshots and model files named by
+  their file names in the design.
 - Edits change only your session's copy. Keep them with `save_model_as` and a NEW file name: it checks the model
   with `ifc_validate` first and refuses an invalid one, and it never writes over a file the person uploaded. A file a
   chat made takes a new version with `base_sha256` and `why`. On a large model the check takes more than one call:

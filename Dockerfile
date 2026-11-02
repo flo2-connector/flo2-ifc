@@ -77,6 +77,7 @@ ENV PATH=/opt/flo2-ifc/bin:$PATH HOME=/tmp PYTHONDONTWRITEBYTECODE=1 FLO2_IFC_RU
 # --version and does not serve.
 RUN flo2-ifc --version && ifcmcp --version \
  && python -c "from ifctester import ids; ids.get_schema(); from flo2_ifc import rules; n = len(rules.rules_for(None)); assert n > 90, n; print('IDS 1.0 schema loaded;', n, 'of buildingSMART\'s rules', rules.release()['rules']['tag'])" \
+ && python -c "from flo2_ifc import bcf_writing; [bcf_writing.schema(n) for n in ('markup', 'visinfo', 'project', 'extensions', 'version', 'documents')]; import ifcdiff; print('BCF 3.0 schemas loaded; IfcDiff', ifcdiff.__version__)" \
  && python -c "import cairosvg; assert cairosvg.svg2png(bytestring=b'<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\"><text y=\"3\">a</text></svg>')[:4] == b'\x89PNG'" \
  && python -c "import pyvista as pv; p = pv.Plotter(off_screen=True, window_size=(64, 48)); p.add_mesh(pv.Cube(), color='red'); img = p.screenshot(return_img=True); said = p.ren_win.ReportCapabilities(); p.close(); assert img.shape == (48, 64, 3) and (img[..., 0] > 128).sum() > 100, img.shape; print('pyvista draws with no display:', [l.strip() for l in said.splitlines() if 'renderer string' in l])"
 USER 65534:65534

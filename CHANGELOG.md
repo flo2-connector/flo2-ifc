@@ -2,6 +2,36 @@
 
 flo2-ifc's versions, newest first. Versions before 0.3.1 are described in README.md, in the sections marked "since".
 
+## 0.10.0 (unreleased)
+
+Two tools are added (`ifc_diff` and `ifc_write_bcf`, 41 tools), with six pins; nothing else changes: a minor
+release. flo2 re-pins to take it (its door runs both as its own steps, `ifc_diff` and `write_bcf`, and the skill pages
+it serves change). From flo2's design 1a97fc1f1de4d5d2,
+`req:a-chat-records-what-changed-between-two-building-models-as-an-ifcdiff-and-a-bcf-file` (accepted 2026-11-02):
+
+- **`ifc_diff`: what changed between two models, with IfcOpenShell's own IfcDiff** (`src/flo2_ifc/diffing.py`). The
+  model open in the session against another file: every element added, deleted and changed, by GlobalId, class and
+  name; which attributes changed, before and after; IfcDiff's record of each property change; type, container,
+  aggregate and classification changes; placements (IfcDiff's quick geometry check) and, on two models up to 8 MiB
+  together, shapes (its full one); counts by class. The whole comparison is written as JSON (IfcDiff's own report
+  inside); a reply lists 50 of each list. It runs in a forked child, stopped at the call's 30 s, its prints kept off
+  the MCP stream. Two fixes to IfcDiff 0.9.0's comparisons, each its own intent: a property set's STEP id is left
+  out (its pattern for it matches no path DeepDiff 9 writes, so another export of the same model read as changed),
+  and equal elements skip DeepDiff (25 of 30 s on a 13 MB model). Refused up front: two models over 100 MB together,
+  from peaks measured under flo2's broker flags at 1152 MiB (`tools/measure.py --diff`, README.md, "What changed
+  between two models": seven public samples, 157 to 758 MiB, two ~31 MB models at 564 MiB).
+- **`ifc_write_bcf`: a BCF 3.0 file with IfcOpenShell's own bcf-client** (`src/flo2_ifc/bcf_writing.py`). Topics with
+  title, description, type, status, labels, author, comments, the elements they touch selected (and coloured) by
+  GlobalId, a camera (given, or bcf-client's aimed at the elements in the open model), a snapshot and the header's
+  model files. Every part is checked against buildingSMART's BCF 3.0 schemas, which ship unchanged in
+  `src/flo2_ifc/schemas/bcf-3.0` (CC BY-ND 4.0), and the file is read back with bcf-client, before it is kept.
+- **Pins:** `ifcdiff==0.9.0` (LGPL-3.0-or-later), `deepdiff==9.1.0`, `orderly-set==5.5.0`, `cachebox==5.2.3` (MIT;
+  cachebox held below 6, which deepdiff 9.1.0 does not admit: `dependency-holds.toml`), `bcf-client==0.9.0`
+  (LGPL-3.0-or-later in its source and upstream's pyproject; its 0.9.0 wheel's classifier says GPLv3), `xsdata==26.10`
+  (MIT). The image grows from 1.55 to 1.56 GB.
+- **The skill** gains `references/recording-changes.md`: ifc_diff the model before and after, then write_bcf one
+  topic per change the person meant, pinned to its elements, with their reason.
+
 ## 0.9.1 (unreleased)
 
 A fix, no tool added or renamed, every served schema unchanged (flo2's re-pin needs no tool-list change):

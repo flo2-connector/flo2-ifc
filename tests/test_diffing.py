@@ -90,7 +90,7 @@ def test_what_changed_on_each_element(pair, tmp_path):
     assert rated["changed"] == ["properties"]
     assert rated["properties"] == {"dictionary_item_added": ["root['Pset_WallCommon']"]}, "IfcDiff's own record of the property change"
     moved = changed[edits["moved"]]
-    assert moved["changed"] == ["geometry"]
+    assert moved["changed"] == ["placement", "geometry"], "its placement (IfcDiff's quick check) and its shape (its full one)"
     assert moved["placement"]["placement_changed"] is True
     assert moved["placement"]["moved_by"] == [1000.0, 0.0, 0.0], "in the model's length unit, millimetres"
 
@@ -108,14 +108,14 @@ def test_the_whole_comparison_is_kept_as_a_json_file(pair, tmp_path):
     assert kept["format"] == "flo2-ifc ifc_diff 1"
     assert kept["before"]["file"] == "house.ifc" and kept["after"]["file"] == "house-after.ifc"
     assert len(kept["before"]["sha256"]) == 64 and len(kept["after"]["sha256"]) == 64
-    assert kept["options"] == {"compare": list(D.COMPARE), "is_shallow": False, "selector": None}
+    assert kept["options"] == {"compare": list(D.DEFAULT_COMPARE), "is_shallow": False, "selector": None}
     assert kept["counts"] == out["counts"]
     assert [e["global_id"] for e in kept["changed"]] == [e["global_id"] for e in out["changed"]]
     # IfcDiff's own report, as its export writes it.
     edits = pair[3]
     assert kept["ifcdiff"]["added"] == [edits["added"]] and kept["ifcdiff"]["deleted"] == [edits["deleted"]]
     assert kept["ifcdiff"]["changed"][edits["renamed"]] == {"attributes_changed": True}
-    assert kept["ifcdiff"]["changed"][edits["moved"]] == {"geometry_changed": True}
+    assert kept["ifcdiff"]["changed"][edits["moved"]] == {"placement_changed": True, "geometry_changed": True}
     assert "IfcDiff 0.9.0" in kept["compared_by"]
 
 
@@ -135,6 +135,39 @@ def test_compare_and_selector_narrow_it(pair, tmp_path):
     assert only_attributes["options"]["compare"] == ["attributes"]
     walls = _diff(pair, tmp_path, selector="IfcWall")
     assert walls["added"] == [] and walls["deleted"] == [] and walls["counts"]["changed"] == 3
+
+
+def test_a_model_written_again_with_every_entity_renumbered_reads_unchanged(pair, tmp_path):
+    """Another export of the same model numbers its entities differently. IfcDiff 0.9.0 means to leave a property
+    set's STEP id out of the comparison, and its pattern for it matches no path DeepDiff 9 writes; flo2-ifc leaves it
+    out, so a renumbered copy reads as what it is: unchanged."""
+    import re
+
+    model, before_path, _, _ = pair
+    text = open(before_path).read()
+    head, data = text.split("DATA;", 1)
+    renumbered = tmp_path / "renumbered.ifc"
+    renumbered.write_text(head + "DATA;" + re.sub(r"#(\d+)", lambda m: f"#{int(m.group(1)) + 100000}", data))
+    out = D.diff(model, before_path, str(renumbered), str(tmp_path / "same"))
+    assert out["counts"]["changed"] == 0, out["changed"]
+    assert out["added"] == [] and out["deleted"] == []
+
+
+def test_two_large_models_compare_placements_in_place_of_shapes(pair, tmp_path, monkeypatch):
+    """Above GEOMETRY_MAX_BYTES IfcDiff's full shape check does not fit one call or the helper's memory (measured), so
+    the default compares placements (IfcDiff's quick geometry check) and says so; asking for shapes is refused
+    unless `selector` narrows it."""
+    monkeypatch.setattr(D, "GEOMETRY_MAX_BYTES", 1000)
+    edits = pair[3]
+    out = _diff(pair, tmp_path)
+    assert out["options"]["compare"] == list(D.DEFAULT_COMPARE_LARGE) and "geometry" not in out["options"]["compare"]
+    assert "shapes were not compared" in out["note_geometry"]
+    moved = {e["global_id"]: e for e in out["changed"]}[edits["moved"]]
+    assert moved["changed"] == ["placement"] and moved["placement"]["moved_by"] == [1000.0, 0.0, 0.0]
+    with pytest.raises(D.DiffRefused, match=r"comparing the shapes of two models this size \(.* together\) does not fit this helper.*Nothing was opened"):
+        _diff(pair, tmp_path, compare="attributes, geometry")
+    narrowed = _diff(pair, tmp_path, compare="geometry", selector="IfcWall")
+    assert {e["global_id"] for e in narrowed["changed"]} == {edits["moved"]}
 
 
 def test_a_long_answer_is_listed_a_page_at_a_time_and_the_file_holds_it_all(pair, tmp_path):
@@ -176,7 +209,7 @@ def test_a_file_that_is_not_ifc_is_refused(pair, tmp_path):
 
 
 def test_what_ifcdiff_cannot_compare_is_refused(pair, tmp_path):
-    with pytest.raises(D.DiffRefused, match="IfcDiff compares attributes, property, type, container, aggregate, classification, geometry"):
+    with pytest.raises(D.DiffRefused, match="IfcDiff compares attributes, property, type, container, aggregate, classification, placement, geometry"):
         _diff(pair, tmp_path, compare="colour")
     with pytest.raises(D.DiffRefused, match='"after"'):
         _diff(pair, tmp_path, other_is="sideways")

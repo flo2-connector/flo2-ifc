@@ -65,7 +65,7 @@ import functools
 import inspect
 from typing import Any
 
-from flo2_ifc import building, checking, drawing, geometry, reading, rules
+from flo2_ifc import bcf_writing, building, checking, diffing, drawing, geometry, reading, rules
 
 #: The tools this module replaces or adds, by name.
 REPLACED = ("ifc_summary", "ifc_tree", "ifc_select", "ifc_info", "ifc_relations", "ifc_validate", "ifc_quantify")
@@ -84,6 +84,8 @@ ADDED = (
     "ifc_add_roof",
     "ifc_add_space",
     "ifc_add_unit",
+    "ifc_diff",
+    "ifc_write_bcf",
 )
 #: The added tools that change the session's model (building.py), counted as edits like ifc_edit.
 BUILDS = ("ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space", "ifc_add_unit")
@@ -710,6 +712,85 @@ def build_server() -> Any:
         :param limit: How many issues to list (default 50).
         """
         return rules.check_rules(model(), path(), rule_sets=rule_sets, start=start, offset=offset, limit=limit, edits=watched["edits"])
+
+    @tool
+    def ifc_diff(
+        other_path: str,
+        output_path: str,
+        other_is: str = "after",
+        compare: str = "",
+        selector: str = "",
+        offset: int = 0,
+        limit: int = diffing.DEFAULT_LIMIT,
+    ) -> dict[str, Any]:
+        """What changed between the model open in this session and another
+        model file, with IfcOpenShell's own IfcDiff: every element ADDED (only
+        in the model after), DELETED (only in the model before) and CHANGED,
+        each by GlobalId, IFC class and name; what changed on each (its
+        attributes, with which ones and their values before and after; its
+        properties, as IfcDiff records them; its type, container, what it is
+        part of, its classifications; its placement, and how far it moved, in
+        the model's length unit; on two small models its shape); and how many
+        of each class. The whole comparison, every element, is written as
+        <output_path>.json (with IfcDiff's own report in it, under
+        `ifcdiff`); the reply lists the first `limit` of each list and says
+        what it withheld. Elements are matched by GlobalId, so a model exported
+        again with new GlobalIds reads as everything deleted and added. Two
+        models too large for this helper's memory (over 100 MB together) are
+        refused before either is opened, and a comparison that does not finish
+        in one call's time is stopped and refused: compare less with `compare`
+        or `selector`. Reads both models only.
+
+        :param other_path: The other model file (.ifc).
+        :param output_path: Where to write the whole comparison, without .json.
+        :param other_is: "after" (the default: the other model is the one after
+            the open one) or "before".
+        :param compare: Optional: comma separated, of attributes, property,
+            type, container, aggregate, classification, placement (IfcDiff's
+            quick geometry check) and geometry (its full one, which makes every
+            shape). Default: all of them; for two models over 8 MiB together,
+            all but geometry, which does not fit one call there.
+        :param selector: Optional: only the elements this IfcOpenShell selector
+            matches in each model, e.g. "IfcWall, IfcDoor".
+        :param offset: Where each list in the reply starts.
+        :param limit: How many of each list the reply gives (default 50).
+        """
+        return diffing.diff(model(), path(), other_path, output_path, other_is=other_is, compare=compare, selector=selector, offset=offset, limit=limit, edits=watched["edits"])
+
+    @tool
+    def ifc_write_bcf(description: str, output_path: str) -> dict[str, Any]:
+        """Write a BCF 3.0 file (buildingSMART's BIM Collaboration Format: issues
+        and changes pinned to a model's elements, which Bonsai, Solibri,
+        BIMcollab and Revit's BCF add-ins open) with IfcOpenShell's own BCF
+        library, bcf-client: never hand-written XML. Every part is checked
+        against buildingSMART's BCF 3.0 schemas and the file is read back
+        before it is kept; an invalid one is refused with the reason, and
+        nothing is written. Written as <output_path>.bcf. Needs no model; with
+        one open, each topic's camera is aimed at its elements there, and the
+        reply names any element the model does not hold.
+
+        ``description`` is JSON: {"project": the project's name, "topics":
+        [topic, ...]}. A topic is {"title", "description" (what changed and
+        why, in the person's words), "topic_type" (e.g. "Request", "Issue",
+        "Remark"), "topic_status" (e.g. "Open", "Closed"), "author", "labels":
+        [...] (optional), "components": [GlobalIds] (the elements it touched,
+        which its viewpoint selects), "colour": "FF8000" (optional: colour them
+        all) or "colours": [{"colour", "components"}] (optional), "camera":
+        {"position": [x, y, z], "direction": [x, y, z], "up": [x, y, z],
+        "kind": "perspective" (with "field_of_view" in degrees) or
+        "orthogonal" (with "view_to_world_scale")} in METRES (optional),
+        "snapshot_path": a PNG or JPEG to show (optional), "files": [the model
+        files it is about, by name, or {"filename", "date", "reference"}]
+        (optional), "comments": [{"author", "comment", "date"}] (optional),
+        "priority", "stage", "assigned_to", "due_date", "date" (optional)}.
+        Dates are ISO 8601. At most 100 topics, 2,000 components a topic and
+        20,000 in all, 50 comments a topic.
+
+        :param description: The BCF, described as above, as JSON text.
+        :param output_path: Where to write it, without .bcf.
+        """
+        held = getattr(session, "model", None)
+        return bcf_writing.write_bcf(description, output_path, model=held, model_path=path() if held is not None else None)
 
     def built(out: dict[str, Any]) -> dict[str, Any]:
         """A building step changed the model: count it as an edit, as ifc_edit is, and forget kept meshes."""
