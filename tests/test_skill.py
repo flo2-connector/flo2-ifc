@@ -68,3 +68,13 @@ def test_every_tool_a_page_names_is_served(page):
     named = set(re.findall(r"\bifc_[a-z_]+\b", (FOLDER / page).read_text()))
     unknown = sorted(named - EXPECTED_TOOLS - ARGUMENTS)
     assert not unknown, f"{page} names tools the server does not serve: {unknown}"
+
+
+def test_the_recipe_for_recording_what_changed_is_a_page_of_its_own():
+    """Since 0.10.0: ifc_diff the model before and after, then a BCF topic per change the person meant."""
+    page = FOLDER / "references" / "recording-changes.md"
+    assert page.is_file(), "references/recording-changes.md"
+    text = page.read_text()
+    for word in ("ifc_diff", "write_bcf", "ifc_write_bcf", "GlobalId", "reason"):
+        assert word in text, word
+    assert "`references/recording-changes.md`" in (FOLDER / "SKILL.md").read_text()
