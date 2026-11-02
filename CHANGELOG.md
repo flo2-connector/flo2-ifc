@@ -19,7 +19,7 @@ it serves change). From flo2's design 1a97fc1f1de4d5d2,
   out (its pattern for it matches no path DeepDiff 9 writes, so another export of the same model read as changed),
   and equal elements skip DeepDiff (25 of 30 s on a 13 MB model). Refused up front: two models over 100 MB together,
   from peaks measured under flo2's broker flags at 1152 MiB (`tools/measure.py --diff`, README.md, "What changed
-  between two models": seven public samples, 157 to 758 MiB, two ~31 MB models at 564 MiB).
+  between two models": seven public samples, 155 to 766 MiB, two ~31 MB models at 541 MiB; the cap stays 1152 MiB).
 - **`ifc_write_bcf`: a BCF 3.0 file with IfcOpenShell's own bcf-client** (`src/flo2_ifc/bcf_writing.py`). Topics with
   title, description, type, status, labels, author, comments, the elements they touch selected (and coloured) by
   GlobalId, a camera (given, or bcf-client's aimed at the elements in the open model), a snapshot and the header's

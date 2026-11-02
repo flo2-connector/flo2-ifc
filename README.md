@@ -325,13 +325,13 @@ spatial element (openings left out). flo2-ifc runs it with:
   moved to another storey, the changes a person most often makes. Plus `placement`, IfcDiff's quick geometry check
   (`diff_element_basic_geometry`: the placement moved or turned, the openings changed), which IfcDiff has and does
   not run: its full geometry check takes only elements with a "Body" shape in a model view, and on the public
-  Clinic_Architectural sample it missed three of the ten elements changed (measured 2026-11-02).
+  Clinic_Architectural and Duplex samples it missed three of the ten elements changed (measured 2026-11-02).
 - `is_shallow=False`, so an element renamed AND moved says both; and each relationship asked separately, because
   IfcDiff stops at the first that differs.
 - **The shapes only where they fit.** IfcDiff's full geometry check makes every shape of both models. Two models over
   8 MiB together (`FLO2_IFC_DIFF_GEOMETRY_MAX_BYTES`) compare placements instead, and say so (`note_geometry`); a call
   that asks for `geometry` there is refused unless `selector` narrows it. Measured: the public AC20-FZK-Haus pair (5.0
-  MB together) took 10.7 s with shapes; a 49.8 MB pair (the public rac_basic_sample_project) ran for minutes and past
+  MB together) took 10.2 s and 208 MiB with shapes, in the container; a 49.8 MB pair (the public rac_basic_sample_project) ran for minutes and past
   850 MB on a laptop.
 - What a chat needs to say a change, added to IfcDiff's report: which attributes changed, with their values before
   and after; where a changed placement moved to, in the model's length unit.
@@ -349,18 +349,22 @@ forked child, stopped at the call's time (30 s), so a child the cap stops leaves
 
 | Public sample (each model) | Entities | Compared | Peak (memory.peak) | Anonymous | Time |
 |---|---|---|---|---|---|
-| AC20-FZK-Haus, 2.6 MB (KIT) | 44,249 | with shapes | 276 MiB | 188 MiB | 10.7 s |
-| Duplex_A_20110907, 2.4 MB (buildingSMART) | 38,898 | with shapes | 157 MiB | 144 MiB | 0.8 s |
-| Clinic_Architectural, 13.0 MB (buildingSMART) | 209,259 | placements | 295 MiB | 264 MiB | 12.4 s |
-| ifc4rac_basic_sample_project, 25.4 MB (opensourceBIM) | 496,141 | placements | 461 MiB | 424 MiB | 2.8 s |
-| Clinic_HVAC, 26.9 MB (buildingSMART) | 455,957 | placements | 492 MiB | 431 MiB | 18.7 s |
-| Duplex_Plumbing_20121113, 31.6 MB (buildingSMART) | 566,909 | placements | 564 MiB | 469 MiB | 4.8 s |
-| Schependomlaan, 49.3 MB (buildingSMART) | 784,962 | placements | 758 MiB | 659 MiB | 18.3 s |
+| AC20-FZK-Haus, 2.6 MB (KIT) | 44,249 | with shapes | 208 MiB | 190 MiB | 10.2 s |
+| Duplex_A_20110907, 2.4 MB (buildingSMART) | 38,898 | with shapes | 155 MiB | 145 MiB | 1.2 s |
+| Clinic_Architectural, 13.0 MB (buildingSMART) | 209,259 | placements | 296 MiB | 264 MiB | 12.6 s |
+| ifc4rac_basic_sample_project, 25.4 MB (opensourceBIM) | 496,141 | placements | 441 MiB | 423 MiB | 2.8 s |
+| Clinic_HVAC, 26.9 MB (buildingSMART) | 455,957 | placements | 489 MiB | 431 MiB | 17.6 s |
+| Duplex_Plumbing_20121113, 31.6 MB (buildingSMART) | 566,909 | placements | 541 MiB | 470 MiB | 4.5 s |
+| Schependomlaan, 49.3 MB (buildingSMART) | 784,962 | placements | 766 MiB | 659 MiB | 18.2 s |
 
-No memory event and no kill in any; at most 7 of the 64 processes. The peak grows by about 6.5 MiB for each MB of
-the two files together. So two models over **100 MB together** (`FLO2_IFC_DIFF_MAX_BYTES`, just over the largest
-pair measured) are refused before either is opened, in plain words; two ~31 MB models (62.5 MB together) fit at
-564 MiB. A session that has already made meshes (a measure, a drawing) holds them too, on top of these.
+No memory event and no kill in any; at most 6 of the 64 processes; each within the call's 30 s. The peak grows by
+about 6.5 MiB for each MB of the two files together. So two models over **100 MB together**
+(`FLO2_IFC_DIFF_MAX_BYTES`, just over the largest pair measured) are refused before either is opened, in plain words
+(measured: 0.03 s, nothing opened); two ~31 MB models (62.5 MB together) fit at 541 MiB. A session that has already
+made meshes (a measure, a drawing) holds them too, on top of these. The broker's cap stays 1152 MiB. Placements catch
+what shapes alone miss: on the Duplex pair 10 elements read changed with both, 7 with shapes alone (the 3 moved
+elements have no "Body" shape in a model view), and on Clinic_Architectural, compared with shapes in 8.0 s at 306
+MiB, the same 7 against 10.
 
 **The BCF file is checked before it is kept** (`src/flo2_ifc/bcf_writing.py`). bcf-client writes it; then every part
 (bcf.version, project.bcfp, extensions.xml, each topic's markup.bcf and viewpoint) is checked against

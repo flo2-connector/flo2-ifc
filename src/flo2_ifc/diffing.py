@@ -66,7 +66,7 @@ COMPARE = ("attributes", "property", "type", "container", "aggregate", "classifi
 #: would not fit one call or the helper's memory (measured: README.md, "What changed between two models"). The
 #: placements are compared with the shapes too: IfcDiff's shape check takes only an element with a "Body" shape in a
 #: model view, so it missed three elements moved in a Revit export (measured 2026-11-02 on the public
-#: Clinic_Architectural sample: 7 changed with shapes alone, 10 with placements).
+#: Clinic_Architectural and Duplex samples: 7 changed with shapes alone, 10 with placements).
 DEFAULT_COMPARE = ("attributes", "property", "type", "container", "aggregate", "classification", "placement", "geometry")
 DEFAULT_COMPARE_LARGE = ("attributes", "property", "type", "container", "aggregate", "classification", "placement")
 #: What each says, for a reply.
@@ -96,8 +96,8 @@ CHANGE_KINDS = {
 #: session at 1152 MiB). Set from peaks measured with tools/measure.py --diff under
 #: the broker's flags (README.md, "What changed between two models"): the largest
 #: pair measured, two public samples of 49.3 and 48.2 MB (785,000 entities each),
-#: peaked at 758 MiB; two of 31.6 and 31.0 MB at 564 MiB. A session that has
-#: already made meshes (a measure, a drawing) holds them as well.
+#: peaked at 766 MiB in 18 s; two of 31.6 and 31.0 MB at 541 MiB. A session that
+#: has already made meshes (a measure, a drawing) holds them as well.
 MAX_BYTES = int(os.environ.get("FLO2_IFC_DIFF_MAX_BYTES", "100000000"))
 #: The two models together, in bytes, up to which their SHAPES are compared by default (IfcDiff's full geometry
 #: check, which makes every shape of both); above it the default compares placements instead, and a call that asks for
