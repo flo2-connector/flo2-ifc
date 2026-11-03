@@ -729,8 +729,10 @@ def build_server() -> Any:
         each by GlobalId, IFC class and name; what changed on each (its
         attributes, with which ones and their values before and after; its
         properties, as IfcDiff records them; its type, container, what it is
-        part of, its classifications; its placement, and how far it moved, in
-        the model's length unit; on two small models its shape); and how many
+        part of, its classifications; its placement, and how far its placement
+        point moved (placement_moved_by, in the model's length unit: not always
+        how far the element moved, which ifc_extent measures on both models,
+        as placement_note says); on two small models its shape); and how many
         of each class. The whole comparison, every element, is written as
         <output_path>.json (with IfcDiff's own report in it, under
         `ifcdiff`); the reply lists the first `limit` of each list and says

@@ -12,7 +12,10 @@ tool (Bonsai, Solibri, BIMcollab, Revit's BCF add-ins) opens the BCF file.
    is the later). It answers every element added, deleted and changed, each by GlobalId, IFC class and name, and what
    changed on each: which attributes, with the value before and after (a renamed wall), its properties (IfcDiff's
    record of which property sets and values changed), its type, its storey (container), what it is part of, its
-   classifications, and its geometry, with `placement.moved_by` when it moved (in the model's length unit). The whole
+   classifications, and its geometry, with `placement.placement_moved_by` when its placement point moved (in the
+   model's length unit). That is not always how far the element moved: an IFC writer may also shift the shape inside
+   its placement (Revit's export does), so measure how far an element moved with `ifc_extent` on both models
+   (`placement_note` says so with every comparison). The whole
    comparison is kept as a NEW JSON file in the design; the reply lists 50 of each list at a time (`offset`, `limit`)
    and says what it withheld, so read the rest a page at a time or point the person to the file.
    - Elements are matched by GlobalId. A model exported again from Revit with new GlobalIds reads as everything
