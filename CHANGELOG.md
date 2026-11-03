@@ -8,7 +8,7 @@ flo2-ifc's versions, newest first. Versions before 0.3.1 are described in README
 
 - **`placement_moved_by`** in place of `moved_by`, in each changed element's `placement`: the same values, named for what they are.
 - **`placement_note`** with every comparison of placements or shapes, in the reply and the kept file: what `placement_moved_by` measures, that it is not always how far the element moved, and that `ifc_extent` on both models measures that.
-- **`ifc_diff`'s description** says the same.
+- **`ifc_diff`'s description**, and the skill's page on recording changes (`references/recording-changes.md`), say the same; both plugin manifests and the skill's compatibility line read 0.11.0.
 - **Tests**: a move is named for what it measures, and the note is in the reply and the kept file; the two tests that read `moved_by` read `placement_moved_by`. Three failed on 0.10.0.
 
 ## 0.10.0 (unreleased)
