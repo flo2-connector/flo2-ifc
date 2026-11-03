@@ -13,7 +13,10 @@ words:
   before and after (IfcDiff only says that they did): read off the two
   elements the way IfcDiff compares them, plain values only;
 - for an element whose geometry changed, whether its PLACEMENT moved and by
-  how much (IfcDiff's geometry check folds the placement into the shape);
+  how much (IfcDiff's geometry check folds the placement into the shape):
+  ``placement_moved_by``, how far its placement POINT went, which is not always
+  how far the element went (PLACEMENT_NOTE: an IFC writer may also shift the
+  shape inside its placement; Revit's export does);
 - for an element whose properties changed, IfcDiff's own record of which
   property sets and values changed (a DeepDiff), as it reports it.
 
@@ -186,6 +189,17 @@ def _attribute_changes(old: ifcopenshell.entity_instance, new: ifcopenshell.enti
     return out
 
 
+#: Said with every comparison of placements or shapes. MEASURED 2026-11-03 (flo2-ifc's fact:root-cause-ifc-diffs-moved-by-is-
+#: the-placement-origins-move-not-the-elements-2026-11-03): on a Revit export of Autodesk's sample house, every level lowered
+#: 238.125 mm, a microwave's placement point moved -476.25 mm while its shape moved -238.1 mm, and elements whose shapes moved
+#: kept their placement point; a chat read the old ``moved_by`` as how far each element moved.
+PLACEMENT_NOTE = (
+    "placement_moved_by is how far an element's placement point moved, in the model's length unit. It is not always how far the "
+    "element moved: an IFC writer may also shift the shape inside its placement (Revit's export does), so an element can move with "
+    "its placement point still, or by a different amount. Measure how far the element itself moved with ifc_extent on both models."
+)
+
+
 def _placement_change(old: ifcopenshell.entity_instance, new: ifcopenshell.entity_instance, precision: float) -> dict[str, Any] | None:
     """Whether the element's placement moved or turned, read with IfcOpenShell's placement utility at IfcDiff's own
     tolerances (its diff_element_basic_geometry), the move in the model's length unit."""
@@ -203,8 +217,8 @@ def _placement_change(old: ifcopenshell.entity_instance, new: ifcopenshell.entit
         return {"placement_changed": False}
     out: dict[str, Any] = {"placement_changed": True}
     if moved:
-        # get_local_placement answers in the model's own length unit.
-        out["moved_by"] = [round(float(x), 6) for x in (b[:3, 3] - a[:3, 3])]
+        # get_local_placement answers in the model's own length unit. Named for what it is: the placement point's move.
+        out["placement_moved_by"] = [round(float(x), 6) for x in (b[:3, 3] - a[:3, 3])]
     if turned:
         out["turned"] = True
     return out
@@ -583,6 +597,8 @@ def diff(
         "options": {"compare": wanted, "is_shallow": False, "selector": selector or None},
         "compared_by": f"IfcDiff {_ifcdiff_version()} (IfcOpenShell's ifcdiff), ifcopenshell {ifcopenshell.version}, flo2-ifc {geometry._version()}",
     }
+    if "placement" in wanted or "geometry" in wanted:
+        header["placement_note"] = PLACEMENT_NOTE
     if not compare and "geometry" not in wanted:
         header["note_geometry"] = (
             f"The shapes were not compared: two models this size ({mb(together)} together, over {mb(GEOMETRY_MAX_BYTES)}) take longer than one call "

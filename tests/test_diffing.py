@@ -92,7 +92,23 @@ def test_what_changed_on_each_element(pair, tmp_path):
     moved = changed[edits["moved"]]
     assert moved["changed"] == ["placement", "geometry"], "its placement (IfcDiff's quick check) and its shape (its full one)"
     assert moved["placement"]["placement_changed"] is True
-    assert moved["placement"]["moved_by"] == [1000.0, 0.0, 0.0], "in the model's length unit, millimetres"
+    assert moved["placement"]["placement_moved_by"] == [1000.0, 0.0, 0.0], "in the model's length unit, millimetres"
+
+
+# Step 7 of flo2's owner's-change loop (2026-11-03, flo2-ifc's fact:root-cause-ifc-diffs-moved-by-is-the-
+# placement-origins-move-not-the-elements-2026-11-03): on a Revit export of Autodesk's sample house, every
+# level lowered 238.125 mm, `moved_by` read -476.25 mm for a microwave whose shape moved -238.1 mm, and no
+# move for elements whose shapes moved; a chat read it as how far each element moved. It is where the
+# element's PLACEMENT point went, which an IFC writer may move apart from the shape inside it.
+def test_a_move_is_named_for_what_it_measures_the_placement_and_the_answer_says_how_to_measure_the_element(pair, tmp_path):
+    out = _diff(pair, tmp_path)
+    moved = {e["global_id"]: e for e in out["changed"]}[pair[3]["moved"]]
+    assert "moved_by" not in moved["placement"], "no field named for a move it does not measure"
+    assert moved["placement"]["placement_moved_by"] == [1000.0, 0.0, 0.0]
+    assert out["placement_note"] == D.PLACEMENT_NOTE
+    assert "placement point" in D.PLACEMENT_NOTE and "ifc_extent" in D.PLACEMENT_NOTE and "not always how far the element" in D.PLACEMENT_NOTE
+    kept = json.loads((tmp_path / "changes.json").read_text())
+    assert kept["placement_note"] == D.PLACEMENT_NOTE, "the kept file says it too"
 
 
 def test_the_whole_comparison_is_kept_as_a_json_file(pair, tmp_path):
@@ -163,7 +179,7 @@ def test_two_large_models_compare_placements_in_place_of_shapes(pair, tmp_path, 
     assert out["options"]["compare"] == list(D.DEFAULT_COMPARE_LARGE) and "geometry" not in out["options"]["compare"]
     assert "shapes were not compared" in out["note_geometry"]
     moved = {e["global_id"]: e for e in out["changed"]}[edits["moved"]]
-    assert moved["changed"] == ["placement"] and moved["placement"]["moved_by"] == [1000.0, 0.0, 0.0]
+    assert moved["changed"] == ["placement"] and moved["placement"]["placement_moved_by"] == [1000.0, 0.0, 0.0]
     with pytest.raises(D.DiffRefused, match=r"comparing the shapes of two models this size \(.* together\) does not fit this helper.*Nothing was opened"):
         _diff(pair, tmp_path, compare="attributes, geometry")
     narrowed = _diff(pair, tmp_path, compare="geometry", selector="IfcWall")

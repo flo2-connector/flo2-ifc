@@ -2,6 +2,15 @@
 
 flo2-ifc's versions, newest first. Versions before 0.3.1 are described in README.md, in the sections marked "since".
 
+## 0.11.0 (unreleased)
+
+`ifc_diff` names a move for what it measures. Step 7 of flo2's owner's-change loop (2026-11-03) compared Autodesk's sample house before and after every level was lowered 238.125 mm: `ifc_diff` said `moved_by` -476.25 mm for nine elements (a microwave among them, whose shape measures -238.1 mm with `ifc_extent`) and no move for about fifty whose shapes moved, and a chat read `moved_by` as how far each element moved. It is how far the element's placement POINT moved: IfcOpenShell's `get_local_placement` of the old and the new placement, which an IFC writer may move apart from the shape inside it (Revit's export does). Root cause in flo2-ifc's design (`fact:root-cause-ifc-diffs-moved-by-is-the-placement-origins-move-not-the-elements-2026-11-03`). A field is renamed, so a minor release; flo2 re-pins to take it.
+
+- **`placement_moved_by`** in place of `moved_by`, in each changed element's `placement`: the same values, named for what they are.
+- **`placement_note`** with every comparison of placements or shapes, in the reply and the kept file: what `placement_moved_by` measures, that it is not always how far the element moved, and that `ifc_extent` on both models measures that.
+- **`ifc_diff`'s description** says the same.
+- **Tests**: a move is named for what it measures, and the note is in the reply and the kept file; the two tests that read `moved_by` read `placement_moved_by`. Three failed on 0.10.0.
+
 ## 0.10.0 (unreleased)
 
 Two tools are added (`ifc_diff` and `ifc_write_bcf`, 41 tools), with six pins; nothing else changes: a minor
