@@ -2,6 +2,24 @@
 
 flo2-ifc's versions, newest first. Versions before 0.3.1 are described in README.md, in the sections marked "since".
 
+## 0.12.1 (unreleased)
+
+A room made in an IFC2X3 model is valid. `ifc_add_space` gave IfcOpenShell the predefined type `INTERNAL`, which
+IFC2X3's IfcSpace does not have: IfcOpenShell wrote it into `ObjectType` and left `InteriorOrExteriorSpace` empty,
+which IFC2X3 requires, so the room failed the schema ("Attribute not optional", `IfcSpace.InteriorOrExteriorSpace`).
+Met by 0.12.0's class test on two public IFC2X3 samples; recorded in flo2-ifc's design as
+`fact:ifc-add-space-leaves-an-ifc2x3-rooms-required-interior-or-exterior-empty-2026-11-05`. IFC4 is unchanged.
+
+- **`building.add_space`**: in IFC2X3 the room's `InteriorOrExteriorSpace` is `INTERNAL` and nothing goes in
+  `ObjectType`; in IFC4 and later its `PredefinedType` is `INTERNAL`, as before.
+- **Every building step is held valid in both schemas** (`tests/test_building.py`): a wall, a slab, a room and a roof,
+  each on an IFC2X3 and an IFC4 model and each validated alone, so a failure names its step and schema. The steps had
+  been tested only on IFC4 models, which is why nothing caught this. The room test failed on 0.12.0 (5b9748c) with the
+  error above; walls, slabs and roofs were already valid in IFC2X3.
+- **The synthetic test models** (`tests/models.py`) are valid in IFC2X3 too: an IFC2X3 model gets a test owner, since
+  IFC2X3 requires every rooted element's owner history and a new file has no person or application to write one from;
+  and its rooms say they are inside.
+
 ## 0.12.0 (unreleased)
 
 `ifc_validate` names each issue's element, and checks only what the session's edits touched when asked. From flo2's

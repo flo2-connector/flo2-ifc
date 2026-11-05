@@ -24,9 +24,27 @@ def _place(model, product, x=0.0, y=0.0, z=0.0):
     ifcopenshell.api.run("geometry.edit_object_placement", model, product=product, matrix=m)
 
 
+def _inside(f: ifcopenshell.file, space) -> None:
+    """IFC2X3 requires a room's InteriorOrExteriorSpace (IFC4 made it the optional PredefinedType)."""
+    if f.schema == "IFC2X3":
+        space.InteriorOrExteriorSpace = "INTERNAL"
+
+
+def _owner(f: ifcopenshell.file) -> None:
+    """IFC2X3 requires every rooted element to carry an owner history, and IfcOpenShell writes one from the file's
+    first IfcPersonAndOrganization and IfcApplication, which a new file does not have yet: give it a test owner."""
+    run = ifcopenshell.api.run
+    person = run("owner.add_person", f, identification="tests", family_name="Tests", given_name="flo2-ifc")
+    org = run("owner.add_organisation", f, identification="flo2-ifc", name="flo2-ifc tests")
+    run("owner.add_person_and_organisation", f, person=person, organisation=org)
+    run("owner.add_application", f, application_developer=org, version="tests", application_full_name="flo2-ifc tests", application_identifier="flo2-ifc-tests")
+
+
 def building(walls: int = 3, schema: str = "IFC4") -> ifcopenshell.file:
     run = ifcopenshell.api.run
     f = run("project.create_file", version=schema)
+    if schema == "IFC2X3":
+        _owner(f)
     project = run("root.create_entity", f, ifc_class="IfcProject", name="Test house")
     mm = run("unit.add_si_unit", f, unit_type="LENGTHUNIT", prefix="MILLI")
     m2 = run("unit.add_si_unit", f, unit_type="AREAUNIT")
@@ -50,6 +68,7 @@ def building(walls: int = 3, schema: str = "IFC4") -> ifcopenshell.file:
 
     for storey, name in ((ground, "Kitchen"), (first, "Bedroom")):
         space = run("root.create_entity", f, ifc_class="IfcSpace", name=name)
+        _inside(f, space)
         run("aggregate.assign_object", f, relating_object=storey, products=[space])
         _place(f, space, z=storey.Elevation / 1000)
         qto = run("pset.add_qto", f, product=space, name="Qto_SpaceBaseQuantities")
@@ -161,6 +180,7 @@ def measured_site(schema: str = "IFC4") -> ifcopenshell.file:
         element("IfcBuildingElementProxy", name, run("geometry.add_mesh_representation", f, context=body, vertices=[v], faces=[t]), x, 0.0, 0.0)
 
     space = run("root.create_entity", f, ifc_class="IfcSpace", name="Room 1")
+    _inside(f, space)
     run("aggregate.assign_object", f, relating_object=ground, products=[space])
     rep = run("geometry.add_slab_representation", f, context=body, depth=2.7, polyline=[(0, 0), (4, 0), (4, 4), (0, 4)])
     run("geometry.assign_representation", f, product=space, representation=rep)
@@ -203,6 +223,7 @@ def rooms_on_a_floor(rooms: list[tuple[str, tuple[float, float, float, float]]],
     run("spatial.assign_container", f, relating_structure=level, products=[slab])
     for name, (x0, y0, x1, y1) in rooms:
         space = run("root.create_entity", f, ifc_class="IfcSpace", name=name)
+        _inside(f, space)
         run("aggregate.assign_object", f, relating_object=level, products=[space])
         rep = run("geometry.add_slab_representation", f, context=body, depth=2.7, polyline=[(0, 0), (x1 - x0, 0), (x1 - x0, y1 - y0), (0, y1 - y0)])
         run("geometry.assign_representation", f, product=space, representation=rep)
