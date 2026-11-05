@@ -52,6 +52,8 @@ EXPECTED_TOOLS = {
     "ifc_add_unit",
     # since 0.10.0: what changed between two models (IfcDiff) and a BCF 3.0 file of it (src/flo2_ifc/diffing.py, bcf_writing.py)
     "ifc_diff", "ifc_write_bcf",
+    # since 0.12.0: what the session's edits touched (src/flo2_ifc/edits.py), which ifc_validate's scope "edits" checks
+    "ifc_edited",
 }
 
 #: The optional arguments flo2-ifc's readers add to ifcmcp's tools.
@@ -59,7 +61,7 @@ ADDED_ARGUMENTS = {
     "ifc_tree": {"storey", "element_type", "offset", "limit"},
     "ifc_select": {"selector", "offset", "limit"},
     "ifc_relations": {"element_id", "traverse", "element_type", "offset", "limit"},
-    "ifc_validate": {"express_rules", "start"},
+    "ifc_validate": {"express_rules", "start", "scope"},
     "ifc_extent": {"selector", "element_id", "offset", "limit", "datum"},
     "ifc_footprint": {"selector", "element_ids", "element_id", "offset", "limit"},
     "ifc_volume": {"selector", "element_ids", "element_id", "offset", "limit"},
@@ -73,6 +75,7 @@ ADDED_ARGUMENTS = {
     "ifc_add_unit": {"unit_type", "unit", "prefix", "parts"},
     "ifc_diff": {"other_path", "output_path", "other_is", "compare", "selector", "offset", "limit"},
     "ifc_write_bcf": {"description", "output_path"},
+    "ifc_edited": {"how", "element_type", "offset", "limit"},
 }
 
 #: The arguments each building step requires.
@@ -187,6 +190,9 @@ async def round_trip() -> dict:
             # The same in the storey's own frame (since 0.8.0): the house's storeys are not turned, so it lands the same.
             out["wall_storey"] = json.loads(text_of(await session.call_tool("ifc_add_wall", {"storey": "GROUND", "start": [0, 6000], "end": [3000, 6000], "height": 2700, "thickness": 100, "frame": "storey"})))
             out["wall_storey_extent"] = json.loads(text_of(await session.call_tool("ifc_extent", {"element_id": out["wall_storey"]["made"]["id"]})))
+            # Since 0.12.0: what the two walls' calls touched, and a check of only that.
+            out["edited"] = json.loads(text_of(await session.call_tool("ifc_edited", {"element_type": "IfcWall"})))
+            out["checked_edits"] = json.loads(text_of(await session.call_tool("ifc_validate", {"scope": "edits"})))
             # ifcmcp's 3D picture (since 0.7.0), written where the confined image can write.
             rendered = await session.call_tool("ifc_render", {"view": "iso", "output_path": f"{tempfile.gettempdir()}/flo2-ifc-smoke-render.png"})
             out["render"] = (rendered.is_error, [(b.type, getattr(b, "mime_type", None), getattr(b, "data", None) or getattr(b, "text", "")) for b in rendered.content])
@@ -203,10 +209,10 @@ def test_initialize_names_the_server_and_gives_instructions(served):
     assert served["instructions"] and "ifc_load" in served["instructions"]
 
 
-def test_list_tools_gives_ifcmcps_25_tools_and_flo2_ifcs_sixteen(served):
+def test_list_tools_gives_ifcmcps_25_tools_and_flo2_ifcs_seventeen(served):
     names = served["tools"]
-    assert len(names) == 41, names
-    assert len(set(names)) == 41, names
+    assert len(names) == 42, names
+    assert len(set(names)) == 42, names
     assert set(names) == EXPECTED_TOOLS
     for name in ("ifc_load", "ifc_summary", "ifc_edit", "ifc_plot", "ifc_render"):
         assert name in names
@@ -246,6 +252,16 @@ def test_a_failing_tool_says_why(served):
     is_error, text = served["missing"]
     assert is_error
     assert "#999999" in text, text
+
+
+def test_the_walls_built_are_the_edits_and_a_check_of_the_edits_checks_them(served):
+    """Since 0.12.0: the record of what the session's edits touched, through the served tools (and the image)."""
+    made = {served["wall"]["made"]["id"], served["wall_storey"]["made"]["id"]}
+    assert {e["id"] for e in served["edited"]["elements"] if e["how"] == "created"} == made
+    v = served["checked_edits"]
+    assert v["scope"] == "edits" and v["complete"] is True and v["valid"] is True, v
+    assert v["edits"]["created"] >= 2 and 0 < v["checked"]["of"] < served["checked"]["checked"]["of"]
+    assert served["checked"]["scope"] == "model"
 
 
 def test_express_rule_validation_runs(served):

@@ -9,8 +9,13 @@ Edit only what the person asked for, and say what you will change before you cha
 2. **Make it.** `ifc_edit` with that `function_path` and its `params` by name, an element as its id:
    `{"product": 190, "attributes": {"Name": "Zone 01 — bathroom"}}`. Read the element back with
    `ifc_info` to check it took.
-3. **Check it.** `ifc_validate`. An error means the model is no longer valid IFC: put it right before
-   going on.
+3. **Check it.** `ifc_validate` with `"scope": "edits"` checks only what your edits touched since the model was
+   opened, their neighbours (what those reference and what references them) and every GlobalId, so it is usually
+   one call whatever the model's size. Each issue names its `element` (`id`, `type`, `global_id`) and
+   `attribute`; `ifc_info` on that `id` finds it. Put right an error your edits made before going on. One the file
+   already had (an exporter's, in a whole check of the file as opened, `"scope": "model"`) is not yours: say so.
+   `ifc_edited` lists what your edits created, changed and removed. If `"scope": "edits"` is refused, check the
+   whole model.
    A measured value (a U-factor through `pset.edit_pset`) is written only in a unit the model declares. If it is
    refused for that, ask the person which unit the number is in, declare it with `ifc_add_unit` (a U-factor in
    W/(m2.K) or Btu/(hr.ft2.°F): its `parts`), then write the number in that unit, unconverted.

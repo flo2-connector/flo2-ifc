@@ -25,15 +25,18 @@ It holds the exact set flo2.io installs to run IfcOpenShell's ifcmcp:
 
 Its one piece of server code is a thin layer: `flo2_ifc.server.build_server` serves every tool ifcmcp's own server
 defines on flo2-ifc's own `MCPServer` (MCP Python SDK 2.x), then replaces seven of them (`ifc_summary`, `ifc_tree`, `ifc_select`, `ifc_info`, `ifc_relations`, `ifc_validate`,
-`ifc_quantify`) with readers that page, filter, keep to one call's time and name the model's units, and adds sixteen
+`ifc_quantify`) with readers that page, filter, keep to one call's time and name the model's units, and adds seventeen
 (`ifc_extent`, `ifc_units`; since 0.3.0 the measures `ifc_footprint`, `ifc_volume`, `ifc_distance` and the drawing
 `ifc_draw`; since 0.5.0 the checks `ifc_check_ids`, `ifc_write_ids` and `ifc_check_rules`; since 0.6.0 the building
 steps `ifc_add_wall`, `ifc_add_slab`, `ifc_add_roof` and `ifc_add_space`; since 0.9.0 `ifc_add_unit`; since 0.10.0
-`ifc_diff` and `ifc_write_bcf`, what changed between two models with IfcDiff and a BCF 3.0 file of it). README.md, "The readers for a whole
+`ifc_diff` and `ifc_write_bcf`, what changed between two models with IfcDiff and a BCF 3.0 file of it; since 0.12.0
+`ifc_edited`, what the session's edits touched). README.md, "The readers for a whole
 building", "Measures and drawings", "Checks", "Building steps" and "What changed between two models", says why each
 one exists. It
 also watches the session's editing methods (`_watch_changes`), so a measure says when the copy was edited and a kept
-mesh is never drawn after an edit. Keep it thin:
+mesh is never drawn after an edit. Since 0.12.0 every tool also runs through the record of what the session's edits
+touched (`edits.py`, README.md "Checking what the edits touched"), which `ifc_validate`'s `scope: "edits"` checks. Keep
+it thin:
 
 - a replacement keeps its tool's name and only adds optional arguments;
 - an argument is renamed only to the name `ARGUMENT_NAMES` gives its thing (one element `element_id`, several
@@ -41,6 +44,9 @@ mesh is never drawn after an edit. Keep it thin:
   older tool list, which flo2's door and chats keep, is answered the same (since 0.9.0);
 - a value with a measure is never given without its unit, or without saying the model declares none (since 0.9.0);
 - a reader returns plain data and never writes the model; `ifc_draw` writes only its two files, where it is told;
+- every tool is classed in `edits.py` as changing, replacing or only reading the session's model (`CHANGES`,
+  `REPLACES`, `READS`), and the server will not start with one unclassed (since 0.12.0): a tool that changes the
+  model is recorded, so a check of the edits sees what it did;
 - a building step (`building.py`) writes only the session's copy, with IfcOpenShell's own api functions (never an
   entity built by hand where a function exists), checks every input before it touches the model, and runs in one
   IfcOpenShell transaction, so a refused or failed step changes nothing; it is counted as an edit, as `ifc_edit` is;
@@ -118,7 +124,7 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp client. It checks:
   - the server's name and instructions;
-  - ifcmcp's 25 tools and flo2-ifc's sixteen, with the readers', measures', checks', building steps' and comparison's arguments;
+  - ifcmcp's 25 tools and flo2-ifc's seventeen, with the readers', measures', checks', building steps' and comparison's arguments;
   - that `ifc_new` and then `ifc_summary` both answer;
   - that a synthetic millimetre house reads whole through the readers, and is measured and drawn (a PNG through
     cairo, so the image's cairo library and fonts are checked too), and rendered in 3D with `ifc_render` (so the
@@ -130,6 +136,12 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
 - `tests/test_tool_list.py` compares the tools it lists (names in order, input and output schemas, descriptions by
   sha256) and the reasons ten failing ifcmcp calls give with flo2-ifc 0.3.1's (`tests/tools-0.3.1.json`).
 - `tests/test_reading.py` tests each reader on synthetic models, including a partial answer at a zero time limit.
+- `tests/test_edits.py` (since 0.12.0): each `ifc_validate` issue names its element and attribute; the record of what
+  the edits touched, through every tool that changes the model, and each way it refuses by name; `scope: "edits"`;
+  `ifc_edited`. `tests/test_edits_class.py` is the class test: on real edits (walls removed, a material association
+  removed, a required attribute emptied, a room added, an element moved and retyped, a storey and a material deleted
+  while others name them), the narrow check finds exactly the errors the whole check says the edits added, element by
+  element, on synthetic models, and on the public samples when `FLO2_IFC_SAMPLES` names their folder.
 - `tests/test_building.py` tests each building step on the starting model (feet and metres), the millimetre
   house, and a storey turned and shifted through its site or its building (`models.turned_storey()`, each step's
   `frame`, since 0.8.0): where each element reaches, its volume or footprint, its storey and its design-part link, every refusal (and
@@ -181,7 +193,8 @@ python3 tools/dependency_currency.py
 | `src/flo2_ifc/__init__.py` | `main()`: the `flo2-ifc` command |
 | `src/flo2_ifc/server.py` | the server on MCP SDK 2.x: ifcmcp's tools, the readers in front of seven, fourteen added, one name for each thing an argument names (`ARGUMENT_NAMES`) with every old name still taken (`ALIASES`), and ifc_edit's property writes held to a declared unit |
 | `src/flo2_ifc/building.py` | the building steps: a wall, a slab, a roof and a room, each made, shaped, placed, put on its storey and linked to its design part in one call; a project unit declared (`add_unit`), and the check that holds ifc_edit's property writes to a declared unit |
-| `src/flo2_ifc/reading.py` | the readers: paging, storeys, every unit and each property's unit, extent (and height above a datum), timed validation |
+| `src/flo2_ifc/reading.py` | the readers: paging, storeys, every unit and each property's unit, extent (and height above a datum), timed validation, each issue naming its element and attribute |
+| `src/flo2_ifc/edits.py` | what the session's edits touched (since 0.12.0): each tool classed, a changing call recorded through IfcOpenShell's transaction, the neighbours `scope: "edits"` checks, `ifc_edited`'s list, and `Step`, the building steps' all-or-nothing |
 | `src/flo2_ifc/geometry.py` | the meshes (kept per session), footprints, volumes and closedness, distances, and `cite` |
 | `src/flo2_ifc/drawing.py` | plans, sections and elevations to scale, as SVG and PNG |
 | `src/flo2_ifc/checking.py` | the IDS check and the IDS writer, with ifctester |

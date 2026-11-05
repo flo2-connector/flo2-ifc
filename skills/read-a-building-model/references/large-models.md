@@ -16,6 +16,7 @@ one answer, and nothing should be read whole:
   selector picks only what the storey contains.
 - `ifc_validate` checks for about 30 s a call. When the answer says `complete: false`, call again with `start` set
   to its `next_start`; only `complete: true` with `valid: true` means the whole model passed. The rules
-  (`express_rules`) may not finish in one call on a model this size, and the answer says so.
+  (`express_rules`) may not finish in one call on a model this size, and the answer says so. After edits,
+  `"scope": "edits"` checks only what they touched, in one call.
 - `ifc_extent` on the whole model takes about 25 s; on a kind of element or one storey, a moment. If it says
   `partial`, narrow the selector.

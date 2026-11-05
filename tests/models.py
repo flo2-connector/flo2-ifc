@@ -76,6 +76,22 @@ def building(walls: int = 3, schema: str = "IFC4") -> ifcopenshell.file:
     return f
 
 
+def with_materials(walls: int = 3, schema: str = "IFC4") -> ifcopenshell.file:
+    """building(walls), each wall given a layered build-up as Revit exports one: an IfcMaterialLayerSetUsage of one
+    200 mm brick layer, associated by its own IfcRelAssociatesMaterial. A usage must be associated with something
+    (its inverse AssociatedTo is SET [1:?]), so removing an association makes the usage, which no edit touched, fail
+    ifc_validate."""
+    run = ifcopenshell.api.run
+    f = building(walls=walls, schema=schema)
+    layers = run("material.add_material_set", f, name="Brick wall", set_type="IfcMaterialLayerSet")
+    brick = run("material.add_material", f, name="Brick")
+    layer = run("material.add_layer", f, layer_set=layers, material=brick)
+    layer.LayerThickness = 200.0
+    for wall in f.by_type("IfcWall"):
+        run("material.assign_material", f, products=[wall], type="IfcMaterialLayerSetUsage", material=layers)
+    return f
+
+
 #: The known numbers of measured_site(), in metres.
 SITE = {
     "footing": (0.0, 0.0, -0.5, 4.0, 4.0, 0.5),  # x, y, z, size x, size y, height

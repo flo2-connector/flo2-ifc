@@ -2,6 +2,55 @@
 
 flo2-ifc's versions, newest first. Versions before 0.3.1 are described in README.md, in the sections marked "since".
 
+## 0.12.0 (unreleased)
+
+`ifc_validate` names each issue's element, and checks only what the session's edits touched when asked. From flo2's
+design 1a97fc1f1de4d5d2, `dec:a-save-checks-only-what-the-edits-touched-and-a-file-versions-own-check-is-kept`
+(accepted 2026-11-05) and its root cause, `fact:root-cause-a-large-models-save-costs-a-chat-three-calls-every-time-
+because-the-check-is-of-the-whole-model-not-the-edit-2026-11-05`: a save of an edited ~500,000-instance model cost a
+chat three calls of 30 s on flo2.io, whatever the edit, because the check ran over the whole model; and from
+flo2-ifc's own two findings of the same day (`fact:ifc-validate-names-an-issue-by-its-message-and-drops-the-element-
+and-attribute-ifcopenshell-gives-it-2026-11-05`, `fact:the-building-model-skill-says-flo2s-save-refuses-an-invalid-
+model-and-it-now-refuses-only-errors-the-edits-add-2026-11-05`). One tool and one optional argument are added, nothing
+is renamed, and every reply keeps its old keys: a minor release. flo2 re-pins to take it.
+
+- **Every issue names its `element` and `attribute`** (`reading.issue`): `level` and `message` exactly as before,
+  and `element` (`{"id": <step id>, "type": <IFC class>, "global_id": <GlobalId or null>}`, or null when it is about
+  no instance) and `attribute` (`"<class>.<attribute>"`, or null), which IfcOpenShell's validator carries and 0.11.0
+  dropped. In the schema's rules' issues too, and in the GlobalId-used-twice issue, which also names the
+  `other_element`. Where IfcOpenShell names an attribute alone, or leaves the last one in place (its GlobalId and
+  application rules), the attribute is named as the issue's own. Every reply also says its `scope`.
+- **What the session's edits touched** (`src/flo2_ifc/edits.py`). Every tool is classed as changing, replacing or
+  reading the model; the server will not start with one unclassed. Each call of one that changes it (`ifc_edit`,
+  `ifc_shape`, `ifc_quantify` and the five building steps) runs with an IfcOpenShell transaction of the record's own
+  open, the mechanism of IfcOpenShell's undo (`store_create`, `store_edit`, `store_delete`, which every change through
+  ifcopenshell.api passes), read into the record when the call ends: what was created, changed (edited, or left naming
+  nothing by a removal) and removed, and what each referenced before. Since the model was opened; `ifc_load`,
+  `ifc_new` and `ifc_reset` start it again. What it cannot see is caught and refused by name: a transaction opened
+  inside a call (IfcOpenShell's alignment functions do), instances added or removed behind it (counted on each
+  changing call), a reading tool that added instances, a model it did not see opened. The building steps and
+  `ifc_edit`'s unit hold take an `edits.Step` (part of the record's transaction) instead of opening their own.
+- **`ifc_validate` with `scope: "edits"`** checks only those instances that still exist and their neighbours (what
+  each references and what references it, now, and what the changed and removed ones referenced and were referenced
+  by before), with the whole model's GlobalIds, header and applications; the reply says `scope`, `checked.of` and how
+  many of each (`edits`). Same paging (`start`, `next_start`). Refused, by name (`scope "edits" is refused: ...`), when
+  the record cannot say, and with `express_rules` (whole model only).
+- **`ifc_edited`**: the record, a page at a time, by `how` (`created`, `changed`, `removed`, `neighbour`, or
+  `checked`, everything scope "edits" checks), narrowed by `element_type`, with `counts` and `since`. 42 tools.
+- **The class test** (`tests/test_edits_class.py`): on real edits (walls removed, a material association removed, a
+  required attribute emptied, a room added, an element moved and retyped, a storey and a material deleted while others
+  name them, and all at once), the narrow check finds exactly the errors the whole check says the edits added, element
+  by element, and nothing else. On a synthetic model in CI; on the public AC20-FZK-Haus (IFC4) and Duplex (IFC2X3)
+  samples with `FLO2_IFC_SAMPLES` (16 cases, none missed, measured 2026-11-05). Measured on the public Clinic_HVAC
+  (455,957 instances) on this machine: the narrow check 0.44 to 0.97 s, the whole check 34.9 to 35.9 s (two calls of
+  30 s; about three on flo2.io), none missed (README.md, "Checking what the edits touched").
+- **The skill** says `save_model_as` refuses only errors the edits ADD, and names the file's own apart (since flo2
+  b044365), and teaches the issue's `element` and `attribute` and `scope: "edits"` (SKILL.md, `references/editing.md`,
+  `references/large-models.md`). Both plugin manifests and the skill's compatibility line read 0.12.0.
+- **Tests**: `tests/test_edits.py` (27) and the class test (8 cases on the synthetic model, and 16 on the samples when
+  named); the smoke test builds two walls and checks them through `ifc_edited` and `scope: "edits"`; the tool list
+  takes `ifc_edited` as new and `ifc_validate`'s `scope` as an added argument. All failed on 0.11.0 (52da28a).
+
 ## 0.11.0 (unreleased)
 
 `ifc_diff` names a move for what it measures. Step 7 of flo2's owner's-change loop (2026-11-03) compared Autodesk's sample house before and after every level was lowered 238.125 mm: `ifc_diff` said `moved_by` -476.25 mm for nine elements (a microwave among them, whose shape measures -238.1 mm with `ifc_extent`) and no move for about fifty whose shapes moved, and a chat read `moved_by` as how far each element moved. It is how far the element's placement POINT moved: IfcOpenShell's `get_local_placement` of the old and the new placement, which an IFC writer may move apart from the shape inside it (Revit's export does). Root cause in flo2-ifc's design (`fact:root-cause-ifc-diffs-moved-by-is-the-placement-origins-move-not-the-elements-2026-11-03`). A field is renamed, so a minor release; flo2 re-pins to take it.

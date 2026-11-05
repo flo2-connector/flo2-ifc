@@ -36,7 +36,7 @@ A large building model read through flo2 (2026-10-23) showed five problems. A ch
 | `ifc_relations` on a storey | over 150,000 characters | each long list paged (`offset`, `limit`) and filtered by `element_type`; `lists` says what was withheld |
 | `ifc_select` "IfcWall" | over 100,000 characters | sorted, a page at a time, with `counts`; the tool text says `location = "<storey>"` selects by storey |
 | `ifc_info` on a room | no storey (a room is part of its storey, not contained in it) | adds `storey`, found through containment or aggregation, with the path; since 0.8.1, `referenced_into`, the other storeys an element spanning storeys is referenced into |
-| `ifc_validate` | over 100 s, one call | checks as much as one call allows (30 s), says `complete` and `next_start`; the schema's rules run in a forked child that is stopped at the call's time |
+| `ifc_validate` | over 100 s, one call | checks as much as one call allows (30 s), says `complete` and `next_start`; the schema's rules run in a forked child that is stopped at the call's time; since 0.12.0 each issue names its element and attribute, and `scope: "edits"` checks only what the session's edits touched (below, "Checking what the edits touched") |
 | (none) | no way to say how high the roof is | `ifc_extent`: bounding boxes from the geometry, in the model's unit, metres, and feet and inches |
 | (none) | replies said lengths were "usually metres"; until 0.9.0 a U-factor came back as a bare number | `ifc_units` (since 0.9.0 EVERY unit the model declares: SI, conversion-based, derived and its currency), `units` in every reply that carries a length, area or volume (since 0.9.0 also the other units declared, and that a measure with none has no unit), and in `ifc_info`, since 0.9.0, each measured property's measure type and unit (`property_units`) |
 
@@ -376,6 +376,86 @@ the folder's README.md). `extensions.xml` lists every topic type, status, label,
 use, as BCF 3.0 asks. Limits (each an environment setting): 100 topics a file, 2,000 elements a topic and 20,000 in
 all, 50 comments and 20 labels a topic, an 8 MiB snapshot.
 
+## Checking what the edits touched (since 0.12.0)
+
+A chat edits a model and flo2's `save_model_as` checks it before keeping it. Until 0.12.0 that check was of the whole
+model, however small the edit: on a ~500,000-instance model each save cost a chat three calls of 30 s on flo2.io
+(flo2's design 1a97fc1f1de4d5d2, `fact:root-cause-a-large-models-save-costs-a-chat-three-calls-every-time-because-the-
+check-is-of-the-whole-model-not-the-edit-2026-11-05`), and a longer call is no fix, because claude.ai stops waiting
+near 60 s. The decision (`dec:a-save-checks-only-what-the-edits-touched-and-a-file-versions-own-check-is-kept`)
+is to check what the edits touched. flo2-ifc gives flo2 three things for it:
+
+**Each issue names its element and attribute** (`reading.issue`). IfcOpenShell's validator says which instance and
+attribute each statement is about; until 0.12.0 `ifc_validate` kept only the level and the message, so "Attribute not
+optional" did not say where (1510fc3728665dbf, `fact:ifc-validate-names-an-issue-by-its-message-and-drops-the-element-
+and-attribute-ifcopenshell-gives-it-2026-11-05`). Now:
+
+```json
+{"level": "error", "message": "Attribute not optional",
+ "element": {"id": 78, "type": "IfcRelContainedInSpatialStructure", "global_id": "3upzUlFvb0txIqLN1tw5nO"},
+ "attribute": "IfcRelContainedInSpatialStructure.RelatingStructure"}
+```
+
+(from a synthetic model, `tests/models.py`; until 0.12.0 the same issue was `{"level": "error", "message":
+"Attribute not optional"}`).
+
+`level` and `message` are as before, byte for byte; `element` is null for what is about no instance (the header, a
+global rule); a GlobalId used twice also names the `other_element`.
+
+**A record of what the edits touched** (`src/flo2_ifc/edits.py`), since the model was opened (`ifc_load`, `ifc_new`;
+`ifc_reset` leaves none). It is IfcOpenShell's own undo record: every change through ifcopenshell.api, and so through
+ifcmcp's `ifc_edit`, `ifc_shape`, `ifc_quantify` and flo2-ifc's building steps, passes through the open transaction
+(`store_create`, `store_edit` with the old and new value, `store_delete` with the removed instance and every instance
+that referenced it). Each call of one of those tools runs with a transaction of the record's own open, read into the
+record when the call ends. Every served tool is classed as changing, replacing or reading the model (`edits.CHANGES`,
+`REPLACES`, `READS`), and the server will not start with one unclassed. What the record cannot see, it says, and
+refuses: a transaction opened inside a call (IfcOpenShell's alignment functions open one), instances added or removed
+that it did not see (each changing call is counted), a reading tool that added instances, a model it did not see
+opened. A reading tool's attribute edit that adds nothing is not caught; none of ifcmcp's or flo2-ifc's readers writes
+the model. `ifc_edited` lists the record a page at a time (`how`: `created`, `changed`, `removed`, `neighbour`, or
+`checked`; `element_type`), with `counts` and `since`.
+
+**`ifc_validate` with `scope: "edits"`** checks the instances the edits created and changed that still exist, and
+their NEIGHBOURS: what each references and what references it now, and what the changed and removed ones referenced
+and were referenced by before (held from the transaction when it happened). An instance's schema check reads its own
+attributes, the class of what they name, and how many instances name it through each inverse, so those are the only
+instances an edit can make fail without touching them: a removed association leaves its usage with none (`With
+inverse: AssociatedTo : SET [1:?] OF IfcRelAssociatesMaterial ... Not valid`), a deleted storey empties its
+containment's `RelatingStructure`. The whole model's GlobalIds, header and applications are checked every call. The
+reply says `scope: "edits"`, `checked.of` (how many it checked) and `edits` (how many created, changed, removed and
+neighbours). When the record cannot say, the call is refused, `scope "edits" is refused: <why> ...`, and the caller
+checks the whole model (`scope: "model"`, the default). The schema's rules (`express_rules`) run on the whole model
+only.
+
+**The class test** (`tests/test_edits_class.py`) holds the risk this carries, that the narrow check misses an error the
+whole one finds. On real edits it compares the two checks element by element (an issue's element, attribute, level and
+message): the narrow check finds nothing the whole check does not, and every error the whole check of the edited model
+has that the model as opened did not. Measured 2026-11-05 on this machine (Intel N95), the whole check in one call:
+
+| Model | Instances | Edits | Checked by `scope: "edits"` | Errors the edits added | Missed | `scope: "edits"` | `scope: "model"` |
+|---|---|---|---|---|---|---|---|
+| AC20-FZK-Haus, IFC4 (KIT) | 44,249 | each of the 7 alone | 3 to 81 | 0 to 3 | 0 | 0.01 to 0.02 s | 3.5 to 4.2 s |
+| | | all at once | 180 | 7 | 0 | 0.04 s | 3.8 s |
+| Duplex_A_20110907, IFC2X3 (buildingSMART) | 38,898 | each of the 7 alone | 3 to 328 | 0 to 6 | 0 | 0.02 to 0.08 s | 2.9 to 3.1 s |
+| | | all at once | 444 | 13 | 0 | 0.10 s | 3.0 s |
+| Clinic_HVAC, IFC2X3 (buildingSMART) | 455,957 | each of 5 alone (it holds no walls, so two flow segments are removed, and no materials) | 7 to 1,664 | 0 to 5 | 0 | 0.44 to 0.87 s | 34.9 to 35.9 s, and 44.0 s once while another check ran |
+| | | all at once | 1,946 | 8 | 0 | 0.97 s | 35.4 s |
+| `models.with_materials(6)`, IFC4 (synthetic, in CI) | 209 | each of the 7 alone, and all at once | 2 to 40 | 0 to 4 | 0 | 0.001 to 0.005 s | 0.015 to 0.025 s |
+
+The edits: a room added (`ifc_add_space`'s own function); an element moved (`geometry.edit_object_placement`) and
+given another class (`root.reassign_class`); two walls removed (`root.remove_product`); a material association removed
+and nothing else; a containment's required `RelatingStructure` emptied (`attribute.edit_attributes`); a storey, and a
+material, deleted while others still name them. The narrow check's time is mostly the whole model's GlobalId check
+(0.44 s on Clinic_HVAC); the whole check took two calls of 30 s here, and about three on flo2.io, which checks about
+2.2 times slower (flo2's root cause above). Its reply was 835 to 2,937 characters on Clinic_HVAC.
+
+On every case the narrow check found exactly the errors the edits added. Some were on instances no edit touched:
+removing two walls of the Duplex left three `IfcLocalPlacement`s placing nothing (`PlacesObject`, an inverse), found
+because the walls had referenced them. Two of the added errors are flo2-ifc's and IfcOpenShell's own, met by the test
+on the IFC2X3 samples: a room added with `ifc_add_space` has no `InteriorOrExteriorSpace`, which IFC2X3 requires, and
+the type `root.reassign_class` makes has no `PredefinedType`. CI runs the synthetic cases; the public ones run where
+`FLO2_IFC_SAMPLES` names a folder holding AC20-FZK-Haus.ifc and Duplex_A_20110907.ifc.
+
 ## Where ifcmcp comes from (since 0.4.0)
 
 ifcmcp is two parts. `core.py` (`IfcSession`) is the tool code: glue over IfcOpenShell's own `ifcquery` and `ifcedit`,
@@ -416,7 +496,7 @@ checked when the server starts, which then fails loudly, and the exact pin and t
 ```
 flo2-ifc                this repository: pins, image, plugin, CI, dependency check, the server on mcp 2.x,
   │                     the readers for a whole building, the measures and the drawings, the checks,
-  │                     what changed between two models (7 tools replaced, 16 added)
+  │                     what changed between two models, what the edits touched (7 tools replaced, 17 added)
   ├─ ifctester          IfcOpenShell's IDS checker and IDS API, from PyPI
   ├─ ifcdiff, bcf       IfcOpenShell's IfcDiff and BCF library (bcf-client), from PyPI, with buildingSMART's BCF 3.0 schemas
   ├─ ifc-gherkin-rules  buildingSMART's validation rules, at the release tools/ifc_rules.py pins, run with behave
@@ -527,7 +607,7 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 ## The tests and the checks
 
-`python -m pytest` runs twenty test files:
+`python -m pytest` runs twenty-two test files:
 
 - `tests/test_skill.py` holds the skill read-a-building-model to its shape: each file at most 16,000 bytes (flo2
   serves each in one reply of at most 30,000 characters), SKILL.md naming every page beside it and no other, and
@@ -535,7 +615,7 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp 2.3.0 client. It checks that:
   - the server initializes as `ifc-mcp`, with instructions;
-  - it lists ifcmcp's 25 tools and flo2-ifc's sixteen, and the readers, measures, checks, building steps and the
+  - it lists ifcmcp's 25 tools and flo2-ifc's seventeen, and the readers, measures, checks, building steps and the
     record of what changed take their arguments;
   - `ifc_new` and then `ifc_summary` both answer;
   - a synthetic millimetre house (`tests/models.py`), opened with `ifc_load`, reads whole: its units, a page of the
@@ -545,13 +625,16 @@ uv venv -p 3.12 && uv pip install '.[test]'
     empty IDS is refused, and buildingSMART's critical and informal-proposition rules run on it; and a wall is built
     on it in one call (`ifc_add_wall`), in each frame; and it is rendered in 3D (`ifc_render`), which checks the image's off-screen
     OpenGL; and it is compared with an edited copy (`ifc_diff`, a forked child whose prints must not reach the MCP
-    stream) and a BCF 3.0 file written of the change (`ifc_write_bcf`).
+    stream) and a BCF 3.0 file written of the change (`ifc_write_bcf`); and the two walls built are what
+    `ifc_edited` lists, and what `ifc_validate` with `scope: "edits"` checks (since 0.12.0).
 - `tests/test_tool_list.py` starts it the same way and compares what it lists with flo2-ifc 0.3.1's list
   (`tests/tools-0.3.1.json`, read from 0.3.1 over stdio): the server's name and instructions, 0.3.1's 31 tools in
-  order (and only the three checks, the four building steps, `ifc_add_unit`, `ifc_diff` and `ifc_write_bcf` added since),
+  order (and only the three checks, the four building steps, `ifc_add_unit`, `ifc_diff`, `ifc_write_bcf` and
+  `ifc_edited` added since),
   each one's input and output schemas, its description (by sha256, so ifcmcp's LGPL text is not copied here), and the
   reason each of ten failing ifcmcp calls gives. The seven tools renamed in 0.9.0 are held instead to taking every
-  argument 0.3.1 took, under its name or as an alias, with its type and whether it is required.
+  argument 0.3.1 took, under its name or as an alias, with its type and whether it is required, as is
+  `ifc_validate`, which takes `scope` since 0.12.0.
 - `tests/test_units.py` (since 0.9.0) builds a window in feet with a U-factor and no thermal transmittance unit, with
   ifcopenshell.api: every declared unit listed with its symbol, the U-factor said to have no unit, then a project
   unit or the property's own, `ifc_add_unit` declaring W/(m2.K), Btu/(hr.ft2.°F) (5.678263 W/(m2.K)), °F, °C, a
@@ -585,6 +668,16 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
   If `FLO2_IFC_SERVER` is set to a command line, the test starts that command instead. CI uses this to ask the built
   image the same questions, under flo2's flags.
+- `tests/test_edits.py` (since 0.12.0) holds each `ifc_validate` issue to naming its element and attribute (a
+  required attribute emptied, an inverse failed, a value of the wrong kind, a GlobalId used twice or not valid, a
+  rule), the record of what the edits touched to every tool that changes the model (each building step, `ifc_edit`,
+  `ifc_shape`, `ifc_quantify`, `ifc_add_unit`), every served tool to being classed (`edits.CHANGES`, `REPLACES`,
+  `READS`), `scope: "edits"` to its neighbours, its time and its paging, and each way the record is refused by name
+  (a transaction opened inside a call, a reader that added to the model, a model it did not see opened, no model).
+- `tests/test_edits_class.py` (since 0.12.0) is the class test (below, "Checking what the edits touched"): on real
+  edits, the narrow check finds every error the whole check says the edits added, and nothing it does not, element
+  by element, on a synthetic model always and on the public AC20-FZK-Haus and Duplex samples when `FLO2_IFC_SAMPLES`
+  names a folder that holds them.
 - `tests/test_diffing.py` (since 0.10.0) compares a synthetic house with an edited copy (a wall renamed, one given a
   fire rating, one moved, the door deleted, a column added): the exact GlobalIds added, deleted and changed and what
   changed on each, the counts by class, the kept JSON with IfcDiff's own report, the other model before, `compare`
