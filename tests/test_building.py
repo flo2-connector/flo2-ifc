@@ -152,6 +152,44 @@ def test_a_room_from_a_footprint_is_part_of_its_storey_with_its_height():
     assert_valid(m)
 
 
+# ------------------------------------------------------------------- both schemas
+
+# IFC2X3 requires attributes IFC4 made optional, and these tests built only on IFC4 models, so nothing held a step to
+# IFC2X3: a room made in an IFC2X3 model left its required InteriorOrExteriorSpace empty (flo2-ifc's design,
+# fact:ifc-add-space-leaves-an-ifc2x3-rooms-required-interior-or-exterior-empty-2026-11-05, met on the public Duplex
+# and Clinic_HVAC samples). Every step is now held valid on a model of each schema, one step at a time, so a failure
+# names the step.
+STEPS = [
+    ("wall", lambda m: building.add_wall(m, storey="GROUND", start=[0, 0], end=[6000, 0], height=3000, thickness=200)),
+    ("slab", lambda m: building.add_slab(m, storey="GROUND", footprint=[[0, 0], [6000, 0], [6000, 4000], [0, 4000]], thickness=200)),
+    ("room", lambda m: building.add_space(m, storey="GROUND", footprint=[[0, 0], [6000, 0], [6000, 4000], [0, 4000]], height=2700, name="Room")),
+    ("roof", lambda m: building.add_roof(m, storey="GROUND", footprint=[[0, 0], [6000, 0], [6000, 4000], [0, 4000]], kind="gable", eave_height=3000, slope=0.5, thickness=200)),
+]
+
+
+@pytest.mark.parametrize("schema", ["IFC2X3", "IFC4"])
+@pytest.mark.parametrize("step", [name for name, _ in STEPS])
+def test_every_step_leaves_a_model_of_either_schema_valid(schema, step):
+    m = models.building(schema=schema)
+    dict(STEPS)[step](m)
+    out = reading.validate(m)
+    assert out["complete"] and out["valid"], f"{step} in {schema}: {out.get('issues')}"
+
+
+@pytest.mark.parametrize("schema", ["IFC2X3", "IFC4"])
+def test_a_room_says_it_is_inside_the_building_in_either_schema(schema):
+    m = models.building(schema=schema)
+    out = building.add_space(m, storey="GROUND", footprint=[[0, 0], [4000, 0], [4000, 3000], [0, 3000]], height=2700, name="Office")
+    space = m.by_id(out["made"]["id"])
+    if schema == "IFC2X3":
+        # IFC2X3: InteriorOrExteriorSpace is required and there is no PredefinedType; nothing goes in ObjectType.
+        assert space.InteriorOrExteriorSpace == "INTERNAL"
+        assert space.ObjectType is None
+    else:
+        # IFC4 replaced the required attribute with the optional PredefinedType.
+        assert space.PredefinedType == "INTERNAL"
+
+
 # ------------------------------------------------------------------- roofs
 
 

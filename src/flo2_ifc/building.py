@@ -399,7 +399,15 @@ def add_space(
     local = [((x - x0) * scale, (y - y0) * scale) for x, y in corners]
 
     def build():
-        space = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcSpace", name=name or None, predefined_type="INTERNAL")
+        # IFC2X3 has no PredefinedType on IfcSpace and REQUIRES InteriorOrExteriorSpace, which IFC4 replaced with the
+        # optional PredefinedType: given a predefined type in IFC2X3, IfcOpenShell writes it into ObjectType and leaves
+        # the required attribute empty, and the room fails the schema (flo2-ifc's design,
+        # fact:ifc-add-space-leaves-an-ifc2x3-rooms-required-interior-or-exterior-empty-2026-11-05).
+        if model.schema == "IFC2X3":
+            space = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcSpace", name=name or None)
+            space.InteriorOrExteriorSpace = "INTERNAL"
+        else:
+            space = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcSpace", name=name or None, predefined_type="INTERNAL")
         if long_name:
             ifcopenshell.api.run("attribute.edit_attributes", model, product=space, attributes={"LongName": long_name})
         rep = ifcopenshell.api.run("geometry.add_slab_representation", model, context=_body(model), depth=h * scale, polyline=local + [local[0]])
