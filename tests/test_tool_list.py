@@ -21,15 +21,16 @@ Since 0.5.0 three tools are ADDED after 0.3.1's (``NEW_SINCE``): the IDS check,
 the IDS writer and buildingSMART's rules; since 0.6.0 four more, the building
 steps (a wall, a slab, a roof and a room, each in one call); since 0.9.0 one
 more, ``ifc_add_unit``; since 0.10.0 two more, ``ifc_diff`` (what changed between
-two models, with IfcDiff) and ``ifc_write_bcf`` (a BCF 3.0 file). Every tool 0.3.1 listed is still listed, in the same
-order, and nothing else is new.
+two models, with IfcDiff) and ``ifc_write_bcf`` (a BCF 3.0 file); since 0.12.0 one more, ``ifc_edited`` (what the
+session's edits touched). Every tool 0.3.1 listed is still listed, in the same order, and nothing else is new.
 
 Since 0.9.0 seven of flo2-ifc's tools name their arguments by one rule
 (server.py, ``ARGUMENT_NAMES``) and their descriptions say so, and ifc_summary,
 ifc_units and ifc_info say every unit (``RENAMED``, ``REDESCRIBED``). Their
 schemas are not 0.3.1's any more; instead every argument 0.3.1 took is still
 taken, under its own name or as an alias of its new one, with the same type
-accepted and the same arguments required.
+accepted and the same arguments required. Since 0.12.0 ``ifc_validate`` also takes ``scope`` (``EXTENDED``), with the
+same rule.
 """
 
 from __future__ import annotations
@@ -50,11 +51,15 @@ from tests.test_smoke import flo2_ifc_command
 
 BEFORE = json.loads((Path(__file__).parent / "tools-0.3.1.json").read_text())
 #: The tools added since 0.3.1, in the order they are listed after its tools.
-NEW_SINCE = ["ifc_check_ids", "ifc_write_ids", "ifc_check_rules", "ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space", "ifc_add_unit", "ifc_diff", "ifc_write_bcf"]
+NEW_SINCE = ["ifc_check_ids", "ifc_write_ids", "ifc_check_rules", "ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space", "ifc_add_unit", "ifc_diff", "ifc_write_bcf", "ifc_edited"]
 #: Since 0.9.0: tools whose arguments were renamed (ALIASES) or now also take a GlobalId (element_id).
 RENAMED = ["ifc_select", "ifc_info", "ifc_relations", "ifc_extent", "ifc_footprint", "ifc_volume", "ifc_distance"]
-#: Since 0.9.0: tools whose descriptions changed: those renamed, and the three that say every unit.
-REDESCRIBED = [*RENAMED, "ifc_summary", "ifc_units"]
+#: Since 0.12.0: tools that take a new optional argument (ifc_validate's `scope`, "edits" checking only what the
+#: session's edits touched). Every argument they took is still taken, as for RENAMED.
+EXTENDED = ["ifc_validate"]
+#: Since 0.9.0: tools whose descriptions changed: those renamed, and the three that say every unit; since 0.12.0 those
+#: extended.
+REDESCRIBED = [*RENAMED, *EXTENDED, "ifc_summary", "ifc_units"]
 
 #: Calls that fail, each keyed as tools-0.3.1.json keys its error. The first
 #: group runs with no model open, the second after ifc_new.
@@ -132,7 +137,7 @@ def test_only_the_new_tools_are_added(now):
 def test_every_tool_takes_the_same_arguments(now):
     before = {t["name"]: t["inputSchema"] for t in BEFORE["tools"]}
     for tool in _old(now):
-        if tool["name"] not in RENAMED:
+        if tool["name"] not in RENAMED + EXTENDED:
             assert tool["inputSchema"] == before[tool["name"]], tool["name"]
 
 
@@ -144,7 +149,7 @@ def test_every_argument_a_renamed_tool_took_is_still_taken(now):
     """A caller holding 0.3.1's tool list still calls the same way: each old argument is served under its own name or
     taken as an alias of its new one (server.ALIASES), its old type is still accepted, and what was required still is."""
     before = {t["name"]: t["inputSchema"] for t in BEFORE["tools"]}
-    for tool in [t for t in _old(now) if t["name"] in RENAMED]:
+    for tool in [t for t in _old(now) if t["name"] in RENAMED + EXTENDED]:
         name, old, new = tool["name"], before[tool["name"]], tool["inputSchema"]
         renamed = ALIASES.get(name, {})
         for arg, prop in old["properties"].items():
