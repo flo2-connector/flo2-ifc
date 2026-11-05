@@ -53,6 +53,15 @@ and whether the session's copy was edited since it was opened: the session's
 editing methods are watched (``_watch_changes``) for that, and so that a
 drawing after an edit draws the edited model.
 
+Since 0.12.0 every tool runs through the record of what the session's edits
+touched (``_recorded``, edits.py): a call of a tool that changes the model is
+recorded through IfcOpenShell's own transaction, one that replaces the model
+starts the record again, and one that reads is watched for a change it should
+not make; every tool is classed as one of the three, or the server does not
+start. ``ifc_validate`` names each issue's element and attribute, and with
+``scope: "edits"`` checks only what the edits touched and their neighbours
+(reading.validate); ``ifc_edited`` lists the record.
+
 Each replacement keeps its tool's name and adds only optional arguments, so a
 caller of ifcmcp's tool still calls it the same way. These are flo2-ifc's, not
 ifcmcp's. Any of them that ifcmcp itself would want is offered to IfcOpenShell
@@ -65,7 +74,7 @@ import functools
 import inspect
 from typing import Any
 
-from flo2_ifc import bcf_writing, building, checking, diffing, drawing, geometry, reading, rules
+from flo2_ifc import bcf_writing, building, checking, diffing, drawing, edits, geometry, reading, rules
 
 #: The tools this module replaces or adds, by name.
 REPLACED = ("ifc_summary", "ifc_tree", "ifc_select", "ifc_info", "ifc_relations", "ifc_validate", "ifc_quantify")
@@ -86,6 +95,7 @@ ADDED = (
     "ifc_add_unit",
     "ifc_diff",
     "ifc_write_bcf",
+    "ifc_edited",
 )
 #: The added tools that change the session's model (building.py), counted as edits like ifc_edit.
 BUILDS = ("ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space", "ifc_add_unit")
@@ -286,15 +296,17 @@ def _hold_units(session: Any) -> None:
         if function_path not in building.WRITES_VALUES:
             return inner(function_path=function_path, params=params)
         model = session._require_model()
-        model.begin_transaction()
+        step = edits.Step(model)  # its own transaction, or part of the record's while the call is recorded
         try:
             out = inner(function_path=function_path, params=params)
-        finally:
-            model.end_transaction()
+        except BaseException:
+            step.take_back()
+            raise
         missing = building.unit_missing_after_edit(model, function_path, params) if isinstance(out, dict) and out.get("ok") else []
         if not missing:
+            step.keep()
             return out
-        model.undo()
+        step.take_back()
         return {
             "ok": False,
             "error": (
@@ -306,6 +318,34 @@ def _hold_units(session: Any) -> None:
         }
 
     session.ifc_edit = edit
+
+
+def _recorded(record: edits.Record, session: Any, name: str, fn):
+    """`fn`, the tool `name`, run through the record of what the session's edits touched (edits.py): a call of a tool
+    that changes the model is recorded, one that replaces it starts the record again, and one that reads is watched
+    for a change it should not make. Every tool is one of the three (edits.CHANGES, REPLACES, READS); one that is in
+    none fails at start, so a new tool is classed before it is served."""
+    if name in edits.CHANGES:
+        kind = "change"
+    elif name in edits.REPLACES:
+        kind = "replace"
+    elif name in edits.READS:
+        kind = "read"
+    else:
+        raise RuntimeError(f"flo2-ifc serves {name} without saying whether it changes the model: class it in edits.py (CHANGES, REPLACES or READS)")
+
+    @functools.wraps(fn)
+    def call(*args, **kwargs):
+        model = getattr(session, "model", None)
+        if kind == "change":
+            return record.change(model, name, lambda: fn(*args, **kwargs))
+        if kind == "read":
+            return record.read(model, name, lambda: fn(*args, **kwargs))
+        out = fn(*args, **kwargs)
+        record.opened(getattr(session, "model", None), name, getattr(session, "model_path", None))
+        return out
+
+    return call
 
 
 def build_server() -> Any:
@@ -332,10 +372,11 @@ def build_server() -> Any:
     session = _session_of(recorded)
     _hold_units(session)
     watched = _watch_changes(session)
+    record = edits.Record()
     server = Server(**recorded.kwargs)
     for fn, kwargs in recorded.tools:
         if fn.__name__ not in REPLACED:
-            server.tool(**kwargs)(_reason_kept(fn))
+            server.tool(**kwargs)(_reason_kept(_recorded(record, session, fn.__name__, fn)))
 
     def model():
         return session._require_model()
@@ -344,8 +385,8 @@ def build_server() -> Any:
         return getattr(session, "model_path", None)
 
     def tool(fn):
-        """Register `fn` under its own name and docstring, through the one catch."""
-        return server.tool(description=inspect.getdoc(fn))(_reason_kept(fn))
+        """Register `fn` under its own name and docstring, through the one catch and the record of the edits."""
+        return server.tool(description=inspect.getdoc(fn))(_reason_kept(_recorded(record, session, fn.__name__, fn)))
 
     from ifcquery import info as info_mod
     from ifcquery import relations as relations_mod
@@ -985,19 +1026,55 @@ def build_server() -> Any:
         return out
 
     @tool
-    def ifc_validate(express_rules: bool = False, start: int = 0) -> dict[str, Any]:
+    def ifc_validate(express_rules: bool = False, start: int = 0, scope: str = "model") -> dict[str, Any]:
         """Check the model against the IFC schema: every instance's attributes
-        and inverses, and that no GlobalId is used twice. A large model is
-        checked over several calls: when time runs out the reply says
-        ``complete: false`` and ``next_start``; call again with ``start`` set
-        to it. Only ``complete: true`` with ``valid: true`` means the whole
-        model passed.
+        and inverses, and that no GlobalId is used twice. Each issue names its
+        ``element`` ({"id", "type", "global_id"}, or null when it is about no
+        instance) and ``attribute``, beside its ``level`` and ``message``. A
+        large model is checked over several calls: when time runs out the
+        reply says ``complete: false`` and ``next_start``; call again with
+        ``start`` set to it. Only ``complete: true`` with ``valid: true`` means
+        everything checked passed. ``scope: "edits"`` checks only what the
+        session's edits touched since the model was opened (what they created
+        and changed, and their neighbours: what those reference and what
+        references them, before and after) with the whole model's GlobalIds,
+        in one call on a large model; an issue anywhere else was the opened
+        model's own. ifc_edited lists that set. When it cannot be known, scope
+        "edits" is refused and says so: check the whole model.
 
         :param express_rules: Also run the schema's rules (slower), once the
-            instances are done, in the call that finishes them.
+            instances are done, in the call that finishes them. Whole model only.
         :param start: Where to check on from: the last reply's ``next_start``.
+        :param scope: "model" (the default): the whole model. "edits": only
+            what the session's edits touched, and their neighbours.
         """
-        return reading.validate(model(), express_rules=express_rules, start=start)
+        scope = scope.strip() or "model"
+        if scope == "model":
+            return reading.validate(model(), express_rules=express_rules, start=start)
+        if scope != "edits":
+            raise ValueError(f'scope is "model" (the whole model, the default) or "edits" (what the session\'s edits touched and their neighbours), not {scope!r}')
+        return reading.validate(model(), express_rules=express_rules, start=start, edits=record.scope(session.model))
+
+    @tool
+    def ifc_edited(how: str = "", element_type: str = "", offset: int = 0, limit: int = reading.DEFAULT_LIMIT) -> dict[str, Any]:
+        """What the session's edits touched since the model was opened (ifc_load
+        or ifc_new), a page at a time: each instance they created, changed
+        (edited, or left naming nothing by a removal) and removed, by step id,
+        with its IFC class, its GlobalId and ``how``; a removed one is named as
+        it was. ``counts`` says how many of each, and ``neighbours``: what
+        they reference and what references them, before and after the edits.
+        ifc_validate with scope "edits" checks the created, changed and
+        neighbours. Refused, with why, when the edits cannot be known.
+
+        :param how: Optional: "created", "changed", "removed" or "neighbour"
+            for one kind; "checked" for everything ifc_validate's scope
+            "edits" checks; left out, what the edits created, changed and
+            removed.
+        :param element_type: Optional: an IFC class the listed elements are kept to, e.g. IfcWall.
+        :param offset: Where to start in the list (default 0).
+        :param limit: How many to list (default 100).
+        """
+        return record.listing(model() if session.model is not None else None, how=how, element_type=element_type, offset=offset, limit=limit)
 
     @tool
     def ifc_quantify(rule: str, selector: str = "") -> dict[str, Any]:

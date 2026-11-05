@@ -36,6 +36,8 @@ import ifcopenshell.util.placement
 import ifcopenshell.util.selector
 import ifcopenshell.util.unit
 
+from flo2_ifc import edits
+
 #: Characters of JSON one listing may spend. flo2's door holds a whole reply to
 #: about 29,000 characters, its own wrapping included.
 PAGE_CHARS = int(os.environ.get("FLO2_IFC_PAGE_CHARS", "20000"))
@@ -933,11 +935,13 @@ def _datum(model: ifcopenshell.file, datum: str) -> tuple[float, str]:
 
 
 class _Window(ifcopenshell.file):
-    """The model, seen by ifcopenshell.validate as only the instances from
-    `start` until the deadline. Everything but iteration is the model's own."""
+    """The model, seen by ifcopenshell.validate as only the instances `ids`
+    names (every one, in file order, unless told) from `start` until the
+    deadline. Everything but iteration is the model's own."""
 
-    def __init__(self, base: ifcopenshell.file, start: int, deadline: float):  # noqa: D107 - no super(): it shares base's state
+    def __init__(self, base: ifcopenshell.file, start: int, deadline: float, ids: list[int] | None = None):  # noqa: D107 - no super(): it shares base's state
         self.__dict__.update(base.__dict__)
+        self._ids = ids
         self._start = start
         self._deadline = deadline
         self.reached = start
@@ -945,7 +949,7 @@ class _Window(ifcopenshell.file):
         self.on_first: Callable[[], None] | None = None
 
     def __iter__(self) -> Iterator[ifcopenshell.entity_instance]:
-        for step_id in self.entity_names()[self._start :]:
+        for step_id in (self.entity_names() if self._ids is None else self._ids)[self._start :]:
             inst = self[step_id]
             if not self.first_seen:
                 self.first_seen = True
@@ -961,13 +965,45 @@ class _Window(ifcopenshell.file):
 _GUID_RULE = "IfcRoot.UR1"
 
 
+def issue(statement: dict[str, Any]) -> dict[str, Any]:
+    """One of ifcopenshell.validate.json_logger's statements as ifc_validate names it (since 0.12.0): its ``level`` and
+    ``message`` exactly as IfcOpenShell gives them, and the ``element`` (step id, IFC class, GlobalId) and
+    ``attribute`` they are about, which its statements carry as ``instance`` and ``attribute`` (IfcOpenShell 0.9.0,
+    validate.py). Until 0.12.0 both were dropped, so a chat could not find the element and flo2's save could match
+    errors only by message (1510fc3728665dbf, fact:ifc-validate-names-an-issue-by-its-message-and-drops-the-element-
+    and-attribute-ifcopenshell-gives-it-2026-11-05). ``element`` is None for what is about no instance (the header,
+    a global rule). ``attribute`` is always ``<class>.<attribute>`` on an element, as IfcOpenShell names most: where
+    it names the attribute alone (a value of the wrong type, "With attribute: ... Not valid") the element's class is
+    put before it; and the GlobalId and application rules (messages "On instance: ...") leave the attribute of the
+    last instance's statement in place, so theirs is named here: ``<class>.GlobalId``, or none for the application
+    rule."""
+    inst = statement.get("instance")
+    element = edits.element_of(inst)
+    message = str(statement["message"])
+    attribute = statement.get("attribute")
+    if message.startswith("On instance:"):
+        attribute = f"{element['type']}.GlobalId" if element and "GlobalId" in message else None
+    if not isinstance(attribute, str):
+        attribute = None
+    elif element and "." not in attribute:
+        attribute = f"{element['type']}.{attribute}"
+    return {"level": statement["level"], "message": message, "element": element, "attribute": attribute}
+
+
 def _duplicate_guids(model: ifcopenshell.file) -> list[dict[str, Any]]:
     seen: dict[str, ifcopenshell.entity_instance] = {}
     issues = []
     for inst in model.by_type("IfcRoot"):
         g = inst.GlobalId
         if g in seen:
-            issues.append({"level": "Error", "message": f"Rule {_GUID_RULE}: GlobalId {g} is used by both #{seen[g].id()} and #{inst.id()}; it should be unique"})
+            first = edits.element_of(seen[g])
+            issues.append({
+                "level": "Error",
+                "message": f"Rule {_GUID_RULE}: GlobalId {g} is used by both #{seen[g].id()} and #{inst.id()}; it should be unique",
+                "element": edits.element_of(inst),
+                "attribute": f"{inst.is_a()}.GlobalId",
+                "other_element": first,
+            })
         else:
             seen[g] = inst
     return issues
@@ -982,7 +1018,7 @@ def _rules_in_child(model: ifcopenshell.file, seconds: float) -> dict[str, Any]:
     if not hasattr(os, "fork"):
         logger = ifcopenshell.validate.json_logger()
         rule_executor.run(model, logger)
-        return {"checked": True, "issues": [{"level": s["level"], "message": s["message"]} for s in logger.statements]}
+        return {"checked": True, "issues": [issue(s) for s in logger.statements]}
     read_end, write_end = os.pipe()
     pid = os.fork()
     if pid == 0:  # the child: run the rules, write what they found, and leave
@@ -991,7 +1027,7 @@ def _rules_in_child(model: ifcopenshell.file, seconds: float) -> dict[str, Any]:
             os.close(read_end)
             logger = ifcopenshell.validate.json_logger()
             rule_executor.run(model, logger)
-            data = json.dumps([{"level": s["level"], "message": str(s["message"])} for s in logger.statements]).encode()
+            data = json.dumps([issue(s) for s in logger.statements]).encode()
         except BaseException as e:  # noqa: BLE001 - the child reports any failure
             data = json.dumps({"failed": f"{type(e).__name__}: {e}"}).encode()
             code = 1
@@ -1031,7 +1067,13 @@ def _rules_in_child(model: ifcopenshell.file, seconds: float) -> dict[str, Any]:
     return {"checked": True, "issues": said}
 
 
-def validate(model: ifcopenshell.file, express_rules: bool = False, start: int = 0, seconds: float | None = None) -> dict[str, Any]:
+def validate(
+    model: ifcopenshell.file,
+    express_rules: bool = False,
+    start: int = 0,
+    seconds: float | None = None,
+    edits: edits.Scope | None = None,
+) -> dict[str, Any]:
     """Check the model against the IFC schema, as much as one call's time allows.
 
     Checks each instance's attributes and inverses, in file order, from
@@ -1042,16 +1084,27 @@ def validate(model: ifcopenshell.file, express_rules: bool = False, start: int =
     Every call also checks that no GlobalId is used twice across the whole
     model. ``express_rules`` also runs the schema's rules once the instances
     are done, if time is left, and says when it was not.
+
+    Each issue names its ``element`` and ``attribute`` (``issue``). With
+    ``edits`` (since 0.12.0: ``edits.Record.scope``, what the session's edits
+    touched and their neighbours) only those instances are checked, in the
+    same way and with the same paging (``start`` is a position in them), with
+    the whole model's GlobalIds, its header and its applications; the reply
+    says ``scope: "edits"`` and how many of each it checked (``edits``).
+    The schema's rules run over the whole model only.
     """
     import ifcopenshell.validate
 
     if start < 0:
         raise ValueError("start is an instance position, 0 or more")
+    scope = edits
+    if scope is not None and express_rules:
+        raise ValueError('express_rules runs the schema\'s rules over the whole model: ask for them with scope "model", not "edits"')
     started = time.monotonic()
     budget = SECONDS if seconds is None else seconds
-    total = len(model.entity_names())
+    total = len(model.entity_names()) if scope is None else len(scope.ids)
     logger = ifcopenshell.validate.json_logger()
-    window = _Window(model, start, started + budget)
+    window = _Window(model, start, started + budget, ids=None if scope is None else scope.ids)
     header_count: list[int] = []
     window.on_first = lambda: header_count.append(len(logger.statements))
     derived = ifcopenshell.ifcopenshell_wrapper.get_feature("use_attribute_value_derived")
@@ -1064,23 +1117,36 @@ def validate(model: ifcopenshell.file, express_rules: bool = False, start: int =
     if start > 0:
         # The header and applications were checked by the call from 0.
         statements = statements[header_count[0] :] if header_count else []
-    issues = [{"level": s["level"], "message": str(s["message"])} for s in statements if _GUID_RULE not in str(s["message"])]
+    issues = [issue(s) for s in statements if _GUID_RULE not in str(s["message"])]
     issues = _duplicate_guids(model) + issues
     reached = window.reached
     complete = reached >= total
     out: dict[str, Any] = {
+        "scope": "model" if scope is None else "edits",
         "valid": not issues,
         "complete": complete,
         "issues": issues[:200],
         "checked": {"from": start, "to": reached, "of": total},
         "next_start": None if complete else reached,
     }
+    if scope is not None:
+        out["edits"] = dict(scope.counts)
     if len(issues) > 200:
         out["issues_withheld"] = len(issues) - 200
     if not complete:
+        what = f"instances {start} to {reached} of {total}" if scope is None else f"{start} to {reached} of the {total} instances the edits touched and their neighbours"
         out["note"] = (
-            f"Partial: instances {start} to {reached} of {total} were checked in {budget:.0f} s. "
-            f"Call ifc_validate again with start {reached} to check on; `valid` covers only what was checked."
+            f"Partial: {what} were checked in {budget:.0f} s. "
+            f"Call ifc_validate again with start {reached}{'' if scope is None else ' and scope "edits"'} to check on; `valid` covers only what was checked."
+        )
+    elif scope is not None:
+        c = scope.counts
+        out["note"] = (
+            f"Checked only what the session's edits touched since the model was opened: the {c['created']} instances they"
+            f" created and {c['changed']} they changed (and {c['removed']} removed), and their {c['neighbours']} neighbours (what"
+            " they reference and what references them, before and after the edits), with every GlobalId, the header and"
+            " the applications across the whole model. An issue on any other instance was the opened model's own;"
+            ' scope "model" checks the whole model.'
         )
     if express_rules:
         left = budget - (time.monotonic() - started)

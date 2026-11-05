@@ -35,7 +35,8 @@ are read in one of two frames, and its reply says which:
 Heights are always above the storey's level, in either frame.
 
 Nothing is hand-built where IfcOpenShell has a function for it. Every input is checked before the model is touched,
-and the steps run in one IfcOpenShell transaction, so a refused or failed step leaves the model as it was.
+and the steps run in one IfcOpenShell transaction (since 0.12.0 an ``edits.Step``, part of the server's record of the
+edits while it records the call), so a refused or failed step leaves the model as it was.
 
 The steps are additive: ifcmcp's ``ifc_edit`` and ``ifc_shape`` stay for anything unusual.
 """
@@ -56,7 +57,7 @@ from ifcopenshell.util.data import Clipping
 from shapely.geometry import Polygon, box
 from shapely.geometry.polygon import orient
 
-from flo2_ifc import reading
+from flo2_ifc import edits, reading
 
 #: The classification a step's design-part link is made in.
 DESIGN_CLASSIFICATION = "flo2 design"
@@ -221,15 +222,15 @@ def _made(element: ifcopenshell.entity_instance) -> dict[str, Any]:
 
 
 def _in_one_transaction(model: ifcopenshell.file, build):
-    """Run `build` so that, if it fails part way, the model is put back as it was."""
-    model.begin_transaction()
+    """Run `build` so that, if it fails part way, the model is put back as it was: one ``edits.Step``, its own
+    IfcOpenShell transaction, or, while the server records the call (edits.py), part of the record's."""
+    step = edits.Step(model)
     try:
         out = build()
     except BaseException:
-        model.end_transaction()
-        model.undo()
+        step.take_back()
         raise
-    model.end_transaction()
+    step.keep()
     return out
 
 
