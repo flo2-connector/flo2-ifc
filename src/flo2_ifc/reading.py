@@ -36,7 +36,7 @@ import ifcopenshell.util.placement
 import ifcopenshell.util.selector
 import ifcopenshell.util.unit
 
-from flo2_ifc import edits
+from flo2_ifc import edits, refusals
 
 #: Characters of JSON one listing may spend. flo2's door holds a whole reply to
 #: about 29,000 characters, its own wrapping included.
@@ -607,6 +607,17 @@ def tree(model: ifcopenshell.file, storey: str = "", element_type: str = "", off
 # ---------------------------------------------------------------- select
 
 
+def selected(model: ifcopenshell.file, selector: str) -> set[ifcopenshell.entity_instance]:
+    """The elements an IfcOpenShell selector matches; a selector it cannot read, or reads and answers with nothing for
+    a reason it can name (a value in single quotes, a class the model's schema lacks), is refused with the selector
+    meant and how one is written (refusals.selector_problem, since 0.13.0). Every selector flo2-ifc's readers resolve
+    comes through here."""
+    problem = refusals.selector_problem(selector, model.schema)
+    if problem:
+        raise refusals.Refused(problem)
+    return ifcopenshell.util.selector.filter_elements(model, selector)
+
+
 def select(model: ifcopenshell.file, query: str, offset: int = 0, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
     """Elements an IfcOpenShell selector matches, sorted by id, a page at a time.
 
@@ -615,7 +626,7 @@ def select(model: ifcopenshell.file, query: str, offset: int = 0, limit: int = D
     its name), and ``IfcWall, IfcDoor, location = "Level 2"`` both kinds on it.
     """
     offset, limit = _check_page(offset, limit)
-    found = sorted(ifcopenshell.util.selector.filter_elements(model, query), key=lambda e: e.id())
+    found = sorted(selected(model, query), key=lambda e: e.id())
     page, info = page_of([_brief(e) for e in found], offset, limit)
     out: dict[str, Any] = {"query": query, "elements": page, "page": info}
     out["counts"] = dict(Counter(e.is_a() for e in found).most_common())
@@ -831,7 +842,7 @@ def extent(
         targets = [element(model, element_id)]
         asked = f"#{targets[0].id()}"
     elif selector.strip():
-        targets = sorted(ifcopenshell.util.selector.filter_elements(model, selector), key=lambda e: e.id())
+        targets = sorted(selected(model, selector), key=lambda e: e.id())
         asked = selector
     else:
         raise ValueError("Name what to measure: `selector` (such as \"IfcRoof\") or `element_id`.")
