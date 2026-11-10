@@ -99,6 +99,7 @@ READS = (
     "ifc_diff",
     "ifc_write_bcf",
     "ifc_edited",
+    "ifc_plan_set",
 )
 #: What ifc_edited lists by ``how``: one kind, the edits' own three (the default, ""), or what scope "edits" checks.
 HOW = ("created", "changed", "removed", "neighbour", "checked")

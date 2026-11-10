@@ -32,7 +32,9 @@ rules.py); and since 0.6.0 the building steps ``ifc_add_wall``, ``ifc_add_slab``
 building in ONE call: the element, its shape, its place, its storey and its
 link to the design part it realizes, with IfcOpenShell's own api functions
 (building.py); and since 0.9.0 ``ifc_add_unit``, which declares a project unit
-(a U-factor's, before a U-factor is written).
+(a U-factor's, before a U-factor is written); and since 0.13.0 ``ifc_plan_set``,
+numbered sheets drawn to scale (each ifc_draw's drawing with its number and
+title) after a cover sheet that lists them, bound into one PDF (plan_set.py).
 
 Since 0.9.0 every unit a model declares is read, and each measured property's
 unit (reading.py, "WHAT A VALUE WITH NO UNIT OF ITS OWN IS IN"); ifc_edit's
@@ -74,7 +76,7 @@ import functools
 import inspect
 from typing import Any
 
-from flo2_ifc import bcf_writing, building, checking, diffing, drawing, edits, geometry, reading, rules
+from flo2_ifc import bcf_writing, building, checking, diffing, drawing, edits, geometry, plan_set, reading, rules
 
 #: The tools this module replaces or adds, by name.
 REPLACED = ("ifc_summary", "ifc_tree", "ifc_select", "ifc_info", "ifc_relations", "ifc_validate", "ifc_quantify")
@@ -96,6 +98,7 @@ ADDED = (
     "ifc_diff",
     "ifc_write_bcf",
     "ifc_edited",
+    "ifc_plan_set",
 )
 #: The added tools that change the session's model (building.py), counted as edits like ifc_edit.
 BUILDS = ("ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space", "ifc_add_unit")
@@ -668,6 +671,48 @@ def build_server() -> Any:
             png_px=png_px,
             edits=watched["edits"],
         )
+
+    @tool
+    def ifc_plan_set(output_path: str, sheets: list[dict[str, Any]] = [], paper: str = "", scale: str = "", title: str = "") -> dict[str, Any]:  # noqa: B006 - read only; a plain list keeps the schema plain
+        """Draw a PLAN SET of the model and bind it into ONE PDF: numbered
+        sheets drawn to scale (each the drawing ifc_draw makes, with its sheet
+        number and title written on it) after a cover sheet that lists them.
+        Written as <output_path>.pdf (vector, a page per sheet, all on one
+        paper) and each sheet's SVG as <output_path>-<number>.svg. With no
+        ``sheets`` the set is: A-001, the cover (the project and building as
+        the model names them, the model file, the date drawn, and every sheet
+        by number, title and scale); A-101 on, a plan of every storey, lowest
+        first (a storey with nothing drawn gets none, and ``notes`` says so);
+        A-201 to A-204, the north, east, south and west elevations; A-301 and
+        A-302, a north-south and an east-west section through the middle of
+        the building. The plans, the elevations and the sections are each at
+        one scale, the largest that fits every sheet of the kind. The reply
+        lists each sheet with its page, scale, what it shows and the ifc_draw
+        arguments that draw it alone, and any sheet not drawn (``not_drawn``)
+        with why. A set keeps to one call's time: a large model's may stop
+        with ``partial``, naming the sheets ``done``; call again with the same
+        arguments and it goes on (what is drawn is kept for the session; an
+        edit starts the set again). Nothing is written until the set is whole.
+        Reads the model only.
+
+        :param output_path: Where to write: <output_path>.pdf and
+            <output_path>-<number>.svg.
+        :param sheets: Optional, the sheets in order: each an object of
+            ifc_draw's own arguments (view, storey, cut_height, line, through,
+            direction, gridline, looking, side, around, margin, depth,
+            highlight, scale) with its ``number`` (default by kind: A-101..
+            plans, A-201.. elevations, A-301.. sections) and ``title``
+            (default: what it shows). Not ``paper``: the set has one.
+            Default: the set above.
+        :param paper: The one sheet size for the whole set: Tabloid (11 x 17",
+            the default), Letter, A4, A3, A2, A1, A0, ARCH C, ARCH D, ANSI D.
+        :param scale: Optional: one scale for every sheet that names none,
+            e.g. "1:100" or 1/8" = 1'-0". Default: as above, or the largest
+            that fits each sheet the caller gives.
+        :param title: The set's name, on the cover and every sheet (default:
+            the project's name, as the model states it).
+        """
+        return plan_set.plan_set(model(), output_path, model_path=path(), sheets=sheets, paper=paper, scale=scale, title=title, edits=watched["edits"])
 
     @tool
     def ifc_check_ids(ids_path: str, report_path: str = "", start: int = 0, offset: int = 0, limit: int = 20) -> dict[str, Any]:

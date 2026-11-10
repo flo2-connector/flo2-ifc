@@ -2,6 +2,46 @@
 
 flo2-ifc's versions, newest first. Versions before 0.3.1 are described in README.md, in the sections marked "since".
 
+## 0.13.0 (unreleased)
+
+A plan set of the model, bound into one PDF. From flo2's design 1a97fc1f1de4d5d2,
+`req:a-chat-pulls-a-pdf-plan-set-of-a-designs-building-model` (2026-11-09): a person who had edited a building model
+through chats asked to "pull a PDF planset", numbered sheets of plans, elevations and sections drawn to scale from the
+model as it stands, with a cover sheet listing them, kept as one PDF. One tool is added and nothing is renamed or
+removed: a minor release. flo2 re-pins to take it.
+
+- **`ifc_plan_set`** (`src/flo2_ifc/plan_set.py`): with no `sheets`, the conventional set: A-001 the cover (the
+  set's name, by default the project's as the model states it; the project and buildings as the model names them;
+  the model file and its sha256; the date drawn; every sheet by number, title and scale, and any not drawn with
+  why), A-101 on a plan of every storey lowest first (a storey with nothing drawn gets none, and a note), A-201 to
+  A-204 the north, east, south and west elevations, A-301 and A-302 a north-south and an east-west section through
+  the middle of the building; plans, elevations and sections each at one scale, the largest that fits all of the
+  kind. Or the caller's sheets, each `ifc_draw`'s own arguments with a `number` and `title` (defaults by kind and by
+  what it shows). One `paper` for the set; `scale` for every sheet that names none; `title` names the set. Writes
+  `<output_path>.pdf`, one vector page per sheet, and `<output_path>-<number>.svg` for each; says what it wrote,
+  every sheet with its page, scale, what it shows and the `ifc_draw` arguments that draw it alone, and `not_drawn`
+  with why. Keeps to one call's time: a large model's set says `partial` with the sheets `done` and `to_do`, and the
+  same call goes on (what is drawn is kept for the session; an edit starts the set again); nothing is written until
+  the set is whole. Reads the model only. 43 tools.
+- **Each sheet is `ifc_draw`'s drawing.** `drawing.draw` is now `drawing.sheet`, which makes the drawing as SVG text,
+  and the writing of its SVG and PNG; `ifc_draw`'s arguments, reply and sheet are unchanged. A set's sheet adds its
+  number and the set's name in a box at the right of its title block, its title over what it shows, its north arrow
+  beside its scale bars, and its title block's words in lines kept clear of them (a portrait sheet's ran under the
+  arrow); `fit_only` says the scale a view would take, drawing nothing.
+- **The PDF** is bound with cairo's own PDF surface through `cairocffi`, which cairosvg draws with: each sheet's SVG
+  drawn by cairosvg onto a recording surface as it is drawn, and replayed a page each when the set is bound.
+  `cairocffi==1.7.1` is pinned (cairosvg 2.9.1 already required it, unpinned; flo2-ifc now imports it itself): no
+  new package is installed.
+- **Measured** on public samples, the default set on one Intel N95 core: AC20-FZK-Haus in one call (8.8 s, 9 pages),
+  the Duplex in one (8.1 s, 11), Clinic_Architectural in three (11 pages, 1.88 MB), Schependomlaan in three (13
+  pages); README.md, "A plan set as one PDF".
+- **The skill**'s `references/drawing.md` teaches the plan set (in flo2, the door's step `draw_plan_set`), and says
+  it is a conceptual set drawn from the model, not a permit set; SKILL.md names it. Both plugin manifests and the
+  skill's compatibility line read 0.13.0.
+- **Tests**: `tests/test_plan_set.py` (30, and one on the public sample when `FLO2_IFC_SAMPLES` names it); the smoke
+  test draws the house's whole set through the server (and in the image, whose cairo writes the PDF); the tool list
+  takes `ifc_plan_set` as new. All failed on 0.12.1 (e72812b).
+
 ## 0.12.1 (unreleased)
 
 A room made in an IFC2X3 model is valid. `ifc_add_space` gave IfcOpenShell the predefined type `INTERNAL`, which

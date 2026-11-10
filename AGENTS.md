@@ -25,14 +25,14 @@ It holds the exact set flo2.io installs to run IfcOpenShell's ifcmcp:
 
 Its one piece of server code is a thin layer: `flo2_ifc.server.build_server` serves every tool ifcmcp's own server
 defines on flo2-ifc's own `MCPServer` (MCP Python SDK 2.x), then replaces seven of them (`ifc_summary`, `ifc_tree`, `ifc_select`, `ifc_info`, `ifc_relations`, `ifc_validate`,
-`ifc_quantify`) with readers that page, filter, keep to one call's time and name the model's units, and adds seventeen
+`ifc_quantify`) with readers that page, filter, keep to one call's time and name the model's units, and adds eighteen
 (`ifc_extent`, `ifc_units`; since 0.3.0 the measures `ifc_footprint`, `ifc_volume`, `ifc_distance` and the drawing
 `ifc_draw`; since 0.5.0 the checks `ifc_check_ids`, `ifc_write_ids` and `ifc_check_rules`; since 0.6.0 the building
 steps `ifc_add_wall`, `ifc_add_slab`, `ifc_add_roof` and `ifc_add_space`; since 0.9.0 `ifc_add_unit`; since 0.10.0
 `ifc_diff` and `ifc_write_bcf`, what changed between two models with IfcDiff and a BCF 3.0 file of it; since 0.12.0
-`ifc_edited`, what the session's edits touched). README.md, "The readers for a whole
-building", "Measures and drawings", "Checks", "Building steps" and "What changed between two models", says why each
-one exists. It
+`ifc_edited`, what the session's edits touched; since 0.13.0 `ifc_plan_set`, a plan set bound into one PDF).
+README.md, "The readers for a whole building", "Measures and drawings", "A plan set as one PDF", "Checks", "Building
+steps" and "What changed between two models", says why each one exists. It
 also watches the session's editing methods (`_watch_changes`), so a measure says when the copy was edited and a kept
 mesh is never drawn after an edit. Since 0.12.0 every tool also runs through the record of what the session's edits
 touched (`edits.py`, README.md "Checking what the edits touched"), which `ifc_validate`'s `scope: "edits"` checks. Keep
@@ -43,7 +43,8 @@ it thin:
   `element_ids`, a selector `selector`), and its old name stays taken as an alias (`ALIASES`), so a call shaped by an
   older tool list, which flo2's door and chats keep, is answered the same (since 0.9.0);
 - a value with a measure is never given without its unit, or without saying the model declares none (since 0.9.0);
-- a reader returns plain data and never writes the model; `ifc_draw` writes only its two files, where it is told;
+- a reader returns plain data and never writes the model; `ifc_draw` writes only its two files, where it is told,
+  and `ifc_plan_set` only its PDF and its sheets' SVGs, and only once the set is whole;
 - every tool is classed in `edits.py` as changing, replacing or only reading the session's model (`CHANGES`,
   `REPLACES`, `READS`), and the server will not start with one unclassed (since 0.12.0): a tool that changes the
   model is recorded, so a check of the edits sees what it did;
@@ -124,7 +125,7 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp client. It checks:
   - the server's name and instructions;
-  - ifcmcp's 25 tools and flo2-ifc's seventeen, with the readers', measures', checks', building steps' and comparison's arguments;
+  - ifcmcp's 25 tools and flo2-ifc's eighteen, with the readers', measures', checks', building steps', comparison's and plan set's arguments;
   - that `ifc_new` and then `ifc_summary` both answer;
   - that a synthetic millimetre house reads whole through the readers, and is measured and drawn (a PNG through
     cairo, so the image's cairo library and fonts are checked too), and rendered in 3D with `ifc_render` (so the
@@ -155,6 +156,10 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
   shading, each side, a selector and a picked-out element.
 - `tests/test_measuring.py` and `tests/test_drawing.py` test the measures and the drawings on `models.measured_site()`,
   whose sizes are known (`models.SITE`).
+- `tests/test_plan_set.py` (since 0.13.0) draws plan sets of the synthetic house: the default set and the caller's
+  sheets, one paper, each sheet's number and title, the cover, the PDF read back (a vector page per sheet), a sheet
+  not drawn, every refusal with nothing written, a set out of time going on and an edit starting it again; on the
+  public AC20-FZK-Haus when `FLO2_IFC_SAMPLES` names its folder.
 - `tests/test_openings.py` measures and draws a wall with an opening and a door (`models.wall_with_a_door()`): the
   meshes behind the measures and drawings cut openings (since 0.8.0); `ifc_extent`'s boxes do not need to.
 - `tests/test_units.py` builds a window with a U-factor and no unit for it (ifcopenshell.api): every declared unit
@@ -196,7 +201,8 @@ python3 tools/dependency_currency.py
 | `src/flo2_ifc/reading.py` | the readers: paging, storeys, every unit and each property's unit, extent (and height above a datum), timed validation, each issue naming its element and attribute |
 | `src/flo2_ifc/edits.py` | what the session's edits touched (since 0.12.0): each tool classed, a changing call recorded through IfcOpenShell's transaction, the neighbours `scope: "edits"` checks, `ifc_edited`'s list, and `Step`, the building steps' all-or-nothing |
 | `src/flo2_ifc/geometry.py` | the meshes (kept per session), footprints, volumes and closedness, distances, and `cite` |
-| `src/flo2_ifc/drawing.py` | plans, sections and elevations to scale, as SVG and PNG |
+| `src/flo2_ifc/drawing.py` | plans, sections and elevations to scale, as SVG and PNG (`sheet` makes one as SVG text, `draw` writes it) |
+| `src/flo2_ifc/plan_set.py` | a plan set (since 0.13.0): the conventional sheets or the caller's, one scale a kind, the cover, each sheet recorded as drawn and the set kept for the session, bound into one PDF with cairo |
 | `src/flo2_ifc/checking.py` | the IDS check and the IDS writer, with ifctester |
 | `src/flo2_ifc/diffing.py` | what changed between two models, with IfcDiff, in a forked child, kept whole as JSON (since 0.10.0) |
 | `src/flo2_ifc/bcf_writing.py`, `src/flo2_ifc/schemas/bcf-3.0/` | a BCF 3.0 file with bcf-client, checked against buildingSMART's BCF 3.0 schemas, which ship there unchanged (since 0.10.0) |
