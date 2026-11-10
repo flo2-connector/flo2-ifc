@@ -360,6 +360,36 @@ the IFC class whose schema it reads, most often not an element's; ifcmcp's `ifc_
 already use these names; `ifc_draw`'s `through`, `around` and `highlight` each name a role, not which element a call
 is about.
 
+## A refusal names the form to copy (since 0.13.0)
+
+A chat calls a tool with what it guesses the tool takes, and when the guess is wrong the refusal is the one text it is
+sure to read then. Until 0.13.0 every refusal for a malformed call was the library's own: lark's `No terminal matches
+'~' ... Expected one of: * DOT` for a selector, pydantic's validator for an argument left out or of the wrong kind,
+Python's `No module named 'ifcopenshell.api.space'`, ifcedit's `Unknown parameter 'product' for
+spatial.assign_container`; and an argument a tool does not take was dropped, not refused. On flo2.io one chat was
+refused six times in three days for a selector (`name ~ "102"`, `name contains "footing"`, `IfcFooting OR IfcPile`),
+and guessed `~` again an hour after its refusal (flo2-ifc's design 1510fc3728665dbf,
+`fact:root-cause-a-refusal-passes-on-the-library-text-and-never-names-the-form-to-copy-2026-11-06`).
+
+`src/flo2_ifc/refusals.py` says what was wrong in the tool's terms and gives the corrected call, built from the
+chat's own input, first (flo2's door passes on a refusal's first 600 characters), then how the thing is written:
+
+| Sent | Refused with |
+|---|---|
+| `ifc_select` `IfcSpace, name ~ "102"` | `` `~` at character 16 is not part of one. Did you mean `IfcSpace, Name *= "102"`? `` and the selector's forms |
+| `ifc_select` `IfcFooting OR IfcPile` | `` Did you mean `IfcFooting + IfcPile`? `` |
+| `ifc_select` `IfcRoom`, or a value in single quotes | the class meant (`IfcSpace`), the text in double quotes: both read and select nothing |
+| `ifc_extent` `{"location": "Level 1"}` | `` Call it as: `{"selector": "IfcElement, location = \"Level 1\""}` `` |
+| `ifc_edit` with `ifc_class`, `name` beside `params` | the call with them inside `params` (it used to run without them) |
+| `ifc_edit` `spatial.assign_container` with `product` | `` Did you mean `products`? `` and every parameter with its type |
+| `ifc_list` `space`, `ifc_docs` `spatial` | the module meant (`spatial`), the functions of the one named |
+
+Every tool's `selector` is checked before the tool runs (`Server.call_tool`), ifcmcp's included, and every selector
+flo2-ifc's own readers resolve goes through `reading.selected` (ifc_draw's `highlight`, `around` and `through` too).
+What is checked is IfcOpenShell's own: the selector's grammar, the model's schema, the editing functions'
+signatures. A call that reads is answered as before. ifc_docs keeps ifcmcp's reason for a function that does not
+exist, as 0.3.1 gave it.
+
 ## What changed between two models, and a BCF file of it (since 0.10.0)
 
 A person changes a model and wants the change written down in openBIM's own form (flo2's design 1a97fc1f1de4d5d2,
@@ -662,7 +692,13 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 ## The tests and the checks
 
-`python -m pytest` runs twenty-three test files:
+`python -m pytest` runs twenty-four test files:
+
+- `tests/test_refusals.py` (since 0.13.0) holds every refusal for a malformed call to the class: for each kind of
+  guess the field made, through every tool that takes the thing guessed, the call is refused with nothing changed,
+  the refusal carries none of the library's own words, its first 600 characters give the corrected form built from
+  the chat's input, and that form answers; and the selector's forms are in ifc_select's description and SKILL.md.
+
 
 - `tests/test_skill.py` holds the skill read-a-building-model to its shape: each file at most 16,000 bytes (flo2
   serves each in one reply of at most 30,000 characters), SKILL.md naming every page beside it and no other, and

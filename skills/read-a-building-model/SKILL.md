@@ -44,7 +44,11 @@ Start one: follow `references/starting-a-model.md`, copy its text changing only 
    their ids, and how many elements of each kind each place holds.
 2. **Find.** `ifc_select` takes a selector such as `"IfcSlab"`, `"IfcSpace"` or `"IfcWall, IfcDoor"`. Each result
    has an id, a type and a name. **By storey:** `IfcDoor, location = "Level 1"` is the doors on the storey named
-   Level 1 (use the name `ifc_tree` gives).
+   Level 1 (use the name `ifc_tree` gives). **By name:** `IfcSpace, Name *= "102"` is the rooms whose name contains
+   102 (case-sensitive); a regex is matched from the start, `IfcSpace, Name = /.*102/`. **Either:**
+   `IfcFooting + IfcPile`. **Not:** `IfcElement, ! IfcWall`. An attribute is capitalised as IFC names it (`Name`, not
+   `name`), and text is in double quotes. There is no `~`, `contains`, `OR` or `AND`: a selector it cannot read is
+   refused with the one meant, so copy that.
 3. **Read.** `ifc_info` on one id gives its attributes, its property sets and its quantity sets (for example
    `Qto_SlabBaseQuantities.GrossArea`), where it is placed, and its `storey`. A room is PART of its storey rather
    than contained in it, and `storey.via` says which.

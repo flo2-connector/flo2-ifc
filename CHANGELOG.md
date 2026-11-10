@@ -42,6 +42,43 @@ removed: a minor release. flo2 re-pins to take it.
   test draws the house's whole set through the server (and in the image, whose cairo writes the PDF); the tool list
   takes `ifc_plan_set` as new. All failed on 0.12.1 (e72812b).
 
+A refusal names the form to copy. A chat on flo2.io guessed ifc_select's selector syntax and tool argument names and
+was refused again and again over 2026-11-02 to 11-05 (flo2-ifc's design 1510fc3728665dbf,
+`fact:a-chat-guessed-ifc-select-and-tool-argument-syntax-and-was-refused-repeatedly-2026-11-05`). Root-caused in
+`fact:root-cause-a-refusal-passes-on-the-library-text-and-never-names-the-form-to-copy-2026-11-06`: every refusal
+flo2-ifc gave for a malformed call was the library's own text, which the one catch passes on as the reason (lark's
+`No terminal matches '~' ... Expected one of: * DOT`, pydantic's validator, Python's importer, ifcedit's `Unknown
+parameter 'product' for spatial.assign_container`), none named the form meant, and the selector's forms beyond a
+class list and `location` were written nowhere a chat reads. The same `~` was guessed again an hour after its
+refusal. No tool or argument is added or renamed and every reply keeps its keys; an argument a tool does not take is
+now refused where it was dropped, so a minor release. flo2 re-pins to take it, and copies the skill.
+
+- **A refusal says what was wrong and gives the corrected call** (`src/flo2_ifc/refusals.py`), built from the
+  caller's own input, in its first 600 characters (what flo2's door passes on), then how the thing is written. Never
+  a library's own words.
+- **A selector** is checked before the tool runs, for every tool's `selector` (`Server.call_tool`, ifcmcp's
+  `ifc_quantify`, `ifc_render` and `ifc_plot` included), and wherever flo2-ifc's readers resolve one
+  (`reading.selected`: `ifc_draw`'s `highlight`, `around` and `through` too). One IfcOpenShell cannot read is refused
+  with the one meant: `~`, `contains`, `like` as `*=`; `OR`, `||` as `+`; `AND` as a comma; `NOT` as `!`; `==` as
+  `=`; a lowercase attribute capitalised (`name` as `Name`, `storey` as `location`); a class in the schema's case.
+  Two it reads and answers with nothing are refused too: a value in single quotes, and a class the model's schema
+  does not have (`IfcRoom`, meant `IfcSpace`).
+- **An argument a tool does not take is refused, not dropped**, with the call meant: a name renamed to the one the
+  tool takes (`where` as `selector`, `function` as `function_path`), a storey moved into the selector, an editing
+  function's own arguments moved into `params`. Dropped, `ifc_edit` with `ifc_class` and `name` beside `params` had
+  made an IfcBuildingElementProxy with no name. An argument left out or of the wrong kind is said in the tool's
+  words, not pydantic's.
+- **An editing function**: a parameter it does not take is answered with its parameters by name and type and the one
+  meant (`products`); a function or module that does not exist with what there is; `ifc_list` of a module that does
+  not exist, and `ifc_docs` of a module with no function, with the module meant and its functions. The edit is still
+  refused as ifcedit refuses it, nothing changed. `ifc_docs` keeps ifcmcp's reason for a function that does not exist,
+  as 0.3.1 gave it (`tests/test_tool_list.py`).
+- **The forms are written where a chat reads first**: `ifc_select`'s description and the skill's SKILL.md (its Find
+  step) give a name that contains text, a regex, either of two selections, not, and the attribute capitalised.
+- **`tests/test_refusals.py`** holds the class: for each kind of guess the field made, through every tool that takes
+  the thing guessed, refused with nothing changed, no library words, the corrected form in the first 600 characters,
+  and that form answering. On 0.12.1 (e72812b): 34 of its 35 tests failed; the control passed.
+
 ## 0.12.1 (unreleased)
 
 A room made in an IFC2X3 model is valid. `ifc_add_space` gave IfcOpenShell the predefined type `INTERNAL`, which

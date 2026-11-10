@@ -55,6 +55,10 @@ it thin:
   never given for an open mesh;
 - every limit (characters, seconds, the geometry library and batch) is an environment setting with a measured default;
 - tests use synthetic models (`tests/models.py`), never a person's model;
+- a refusal of a malformed call says what was wrong in the tool's terms and gives the corrected call, built from the
+  caller's own input, in its first 600 characters (flo2's door passes on no more), never a library's own text, and
+  an argument a tool does not take is refused, never dropped (`refusals.py`, since 0.13.0;
+  `tests/test_refusals.py`);
 - a check runs IfcOpenShell's or buildingSMART's own code (ifctester, the gherkin rules), never a checker of our own,
   and an IDS is built with ifctester's API, never written as XML by hand;
 - a comparison is IfcDiff's (since 0.10.0): flo2-ifc only chooses its options, asks it so a model fits one call, and
@@ -166,6 +170,8 @@ FLO2_IFC_RULES_DIR=/tmp/flo2-ifc-rules /tmp/flo2-ifc-venv/bin/python -m pytest -
   listed, the U-factor said to have none, `ifc_add_unit` declaring units and refusing what is not one, and `ifc_edit`
   refusing to write the U-factor until its unit is declared.
 - `tests/test_argument_names.py` holds every tool to one name for each thing, and every old name to still working.
+- `tests/test_refusals.py` (since 0.13.0) holds every refusal for a malformed call to the class: refused with nothing
+  changed, none of the library's own words, the corrected call in the first 600 characters, and that call answering.
 - `tests/test_diffing.py` and `tests/test_bcf.py` (since 0.10.0) compare a synthetic house with an edited copy (the
   exact GlobalIds added, deleted and changed, what changed on each, the kept JSON, every refusal with nothing
   written), and write a BCF 3.0 file that opens again with bcf-client and is valid against buildingSMART's schemas.
@@ -198,6 +204,7 @@ python3 tools/dependency_currency.py
 | `src/flo2_ifc/__init__.py` | `main()`: the `flo2-ifc` command |
 | `src/flo2_ifc/server.py` | the server on MCP SDK 2.x: ifcmcp's tools, the readers in front of seven, fourteen added, one name for each thing an argument names (`ARGUMENT_NAMES`) with every old name still taken (`ALIASES`), and ifc_edit's property writes held to a declared unit |
 | `src/flo2_ifc/building.py` | the building steps: a wall, a slab, a roof and a room, each made, shaped, placed, put on its storey and linked to its design part in one call; a project unit declared (`add_unit`), and the check that holds ifc_edit's property writes to a declared unit |
+| `src/flo2_ifc/refusals.py` | a refusal that names the form to copy (since 0.13.0): a selector, an argument, an editing function, each said in the tool's terms with the call meant |
 | `src/flo2_ifc/reading.py` | the readers: paging, storeys, every unit and each property's unit, extent (and height above a datum), timed validation, each issue naming its element and attribute |
 | `src/flo2_ifc/edits.py` | what the session's edits touched (since 0.12.0): each tool classed, a changing call recorded through IfcOpenShell's transaction, the neighbours `scope: "edits"` checks, `ifc_edited`'s list, and `Step`, the building steps' all-or-nothing |
 | `src/flo2_ifc/geometry.py` | the meshes (kept per session), footprints, volumes and closedness, distances, and `cite` |
