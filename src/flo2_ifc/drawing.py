@@ -19,6 +19,11 @@ unit, a scale bar in metres and in feet, and the model file it was drawn from
 written on it. A set of elements can be highlighted, so a later drawing can
 show what changed. The SVG is in millimetres of paper, so it prints at its
 scale; the PNG is rendered from it with cairosvg. Reads only.
+
+Since 0.13.0 the drawing is made by ``sheet`` as SVG text, which ``draw``
+writes, with its picture, and a plan set (plan_set.py) binds into one PDF: a
+set's sheet carries its number and the set's name in a box at the right of its
+title block, and ``fit_only`` says the scale a view would take, drawing nothing.
 """
 
 from __future__ import annotations
@@ -370,11 +375,20 @@ def _nice(step_target: float, steps: tuple[float, ...]) -> float:
     return steps[-1]
 
 
+_BARS = (("m", 1.0, (0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200)), ("ft", 1 / 0.3048, (0.5, 1, 2, 4, 5, 10, 20, 25, 50, 100, 200, 500)))
+
+
+def _scale_bars_width(ratio: int) -> float:
+    """How far the scale bars reach left of the right edge they end at, in millimetres of paper."""
+    k = 1000.0 / ratio
+    return 6 + 4 * max(_nice(12.0 / k * per_m, steps) / per_m * k for _, per_m, steps in _BARS)
+
+
 def _scale_bars(right: float, y: float, ratio: int) -> list[str]:
     """Two scale bars, metres and feet, of four steps of 12 to 30 mm of paper, ending at `right`."""
     out = []
     k = 1000.0 / ratio  # paper mm per metre
-    for row, (unit, per_m, steps) in enumerate((("m", 1.0, (0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200)), ("ft", 1 / 0.3048, (0.5, 1, 2, 4, 5, 10, 20, 25, 50, 100, 200, 500)))):
+    for row, (unit, per_m, steps) in enumerate(_BARS):
         step = _nice(12.0 / k * per_m, steps)  # at least 12 mm a step
         mm = step / per_m * k
         x = right - 6 - 4 * mm
@@ -519,6 +533,44 @@ STYLE = (
 )
 
 
+#: The views a drawing is of.
+VIEWS = ("plan", "section", "elevation")
+#: A plan set's sheet (plan_set.py) has a box at the right of its title block for its number and the set's name.
+SHEET_BOX_MM = 44.0
+
+
+def clip(text: str, width_mm: float, size: float, em: float = _EM) -> str:
+    """`text` cut with an ellipsis to fit `width_mm` of paper at font `size`, as a label's width is reckoned."""
+    most = max(1, int(width_mm / (size * em)))
+    return text if len(text) <= most else text[: max(1, most - 1)].rstrip() + "…"
+
+
+def sheet_box(pw: float, ph: float, number: str, set_name: str) -> list[str]:
+    """A plan set's sheet number, large, and the set's name, in a box at the right of the title block."""
+    x0 = pw - MARGIN_MM / 2 - SHEET_BOX_MM
+    top = ph - MARGIN_MM - TITLE_MM
+    bottom = ph - MARGIN_MM / 2
+    cx = x0 + SHEET_BOX_MM / 2
+    size = min(7.0, (SHEET_BOX_MM - 4) / (max(len(number), 1) * 0.72))
+    return [
+        '<g id="sheet">',
+        f'<path d="M{x0:.2f} {top:.2f}V{bottom:.2f}" stroke="#000" stroke-width="0.25"/>',
+        _text(cx, top + 5, clip(set_name, SHEET_BOX_MM - 4, 2.2), 2.2, "middle"),
+        _text(cx, top + 9.5, "SHEET", 1.8, "middle"),
+        _text(cx, top + 18, number, size, "middle", "bold"),
+        "</g>",
+    ]
+
+
+def source_line(model_path: str | None, edits: int) -> tuple[str, str, str | None]:
+    """What a sheet says it was drawn from: the model file and its sha256; the session's edits, if any ("" if none);
+    and the sha256."""
+    sha = geometry.file_sha256(model_path)
+    source = f"Drawn from {os.path.basename(model_path) if model_path else 'a model made in this session'}" + (f" (sha256 {sha[:12]}…)" if sha else "")
+    edited = f"as edited in the session ({edits} change(s), not saved to that file)" if edits else ""
+    return source, edited, sha
+
+
 def draw(
     model: ifcopenshell.file,
     output_path: str,
@@ -544,6 +596,74 @@ def draw(
     seconds: float | None = None,
 ) -> dict[str, Any]:
     """Draw a plan, section or elevation to scale, as `output_path`.svg and `output_path`.png. See server.py's ifc_draw."""
+    started = time.monotonic()
+    if (view or "plan").strip().lower() not in VIEWS:
+        raise ValueError(f'{(view or "plan").strip().lower()!r} is not a view: "plan", "section" or "elevation".')
+    stem = re.sub(r"\.(svg|png)$", "", output_path.strip(), flags=re.I)
+    if not stem:
+        raise ValueError("`output_path` says where the drawing is written: <output_path>.svg and <output_path>.png.")
+    out, text = sheet(
+        model, view=view, model_path=model_path, storey=storey, cut_height=cut_height, line=line, through=through,
+        direction=direction, gridline=gridline, looking=looking, side=side, around=around, margin=margin, depth=depth,
+        highlight=highlight, scale=scale, paper=paper, title=title, edits=edits, seconds=seconds,
+    )
+    if text is None:
+        return out
+
+    # 7. WRITE IT, and its picture.
+    import cairosvg
+
+    pw, ph = out["sheet"]["size_mm"]
+    os.makedirs(os.path.dirname(os.path.abspath(stem)) or ".", exist_ok=True)
+    with open(stem + ".svg", "w", encoding="utf-8") as f:
+        f.write(text)
+    long_side = max(400, min(int(png_px), 6000))
+    px_w, px_h = (long_side, round(long_side * ph / pw)) if pw >= ph else (round(long_side * pw / ph), long_side)
+    png = cairosvg.svg2png(bytestring=text.encode("utf-8"), output_width=px_w, output_height=px_h, background_color="white")
+    with open(stem + ".png", "wb") as f:
+        f.write(png)
+    drawn = {"svg": stem + ".svg", "png": stem + ".png", "svg_bytes": len(text.encode("utf-8")), "png_bytes": len(png), "png_px": [px_w, px_h]}
+    heading = out.pop("title")
+    reply = {"view": out.pop("view"), "what": heading, "drawn": drawn}
+    out.pop("what")
+    reply.update(out)
+    reply["seconds"] = round(time.monotonic() - started, 1)
+    reply["units"] = reply.pop("units")
+    return reply
+
+
+def sheet(
+    model: ifcopenshell.file,
+    view: str = "plan",
+    model_path: str | None = None,
+    storey: str = "",
+    cut_height: float | None = None,
+    line: str = "",
+    through: str = "",
+    direction: str = "",
+    gridline: str = "",
+    looking: str = "",
+    side: str = "",
+    around: str = "",
+    margin: float | None = None,
+    depth: float | None = None,
+    highlight: str = "",
+    scale: str = "",
+    paper: str = "",
+    title: str = "",
+    edits: int = 0,
+    seconds: float | None = None,
+    number: str = "",
+    set_name: str = "",
+    fit_only: bool = False,
+) -> tuple[dict[str, Any], str | None]:
+    """One drawing to scale, as SVG text not yet written, and its reply: draw() writes it; a plan set binds it.
+
+    The reply's ``what`` is what the drawing shows and ``title`` the words its title block leads with (``title`` when
+    given, else ``what``). With ``number`` it is a plan set's sheet (plan_set.py): the sheet number, large, and
+    ``set_name`` in a box at the right of its title block, and what it shows written under its title. With
+    ``fit_only`` it stops once the scale is chosen and says it (``fits``), drawing nothing: the scale each of a plan
+    set's sheets would take alone. A drawing that runs out of time answers ``partial`` with no text."""
     import shapely
 
     started = time.monotonic()
@@ -553,11 +673,8 @@ def draw(
     m_per_unit = u.scale
     to_m = lambda v: float(v) * m_per_unit  # noqa: E731
     view = (view or "plan").strip().lower()
-    if view not in ("plan", "section", "elevation"):
+    if view not in VIEWS:
         raise ValueError(f'{view!r} is not a view: "plan", "section" or "elevation".')
-    stem = re.sub(r"\.(svg|png)$", "", output_path.strip(), flags=re.I)
-    if not stem:
-        raise ValueError("`output_path` says where the drawing is written: <output_path>.svg and <output_path>.png.")
     width_mm, height_mm, paper_name = paper_of(paper)
     margin_m = to_m(margin) if margin is not None else 1.0
     highlighted = elements_named(model, highlight)
@@ -636,8 +753,7 @@ def draw(
             what = f"{side.strip().capitalize()} elevation"
         if storey.strip():
             what += f", {', '.join(s.Name or '' for s in sts)}"
-    if title.strip():
-        what = title.strip()
+    heading = title.strip() or what
 
     # 2. THE MESHES (kept between calls: a second drawing does not make them again).
     todo = elements + [s for s in spaces] + [e for e in highlighted if e.id() not in {x.id() for x in elements}]
@@ -653,7 +769,7 @@ def draw(
             ),
             "seconds": round(time.monotonic() - started, 1),
             "units": u.say,
-        }
+        }, None
     extra_hl = [e for e in highlighted if e.id() not in {x.id() for x in elements} and not e.is_a("IfcSpace") and e.id() in got]
     drawn_elements = [e for e in elements if e.id() in got] + extra_hl
     no_shape = sum(1 for e in elements if e.id() not in got)
@@ -721,6 +837,8 @@ def draw(
     if best is None:
         raise ValueError(f"This view ({u.length_of(fw)['model']:,} x {u.length_of(fh)['model']:,} {u.length}) does not fit on {paper_name} at 1:{CANDIDATES[-1]}; draw less with `around` or `storey`.")
     ratio, pw, ph, aw, ah = best
+    if fit_only:
+        return {"view": view, "what": what, "fits": {"ratio": ratio, "scale": scale_say(ratio), "orientation": "landscape" if pw >= ph else "portrait"}}, None
     k = 1000.0 / ratio  # paper mm per metre
     grid = 0.0001 * ratio  # a tenth of a millimetre of paper, in metres
     ox = MARGIN_MM + (aw - fw * k) / 2 - frame[0] * k
@@ -739,7 +857,7 @@ def draw(
                 "stopped": f"Time ran out ({budget:.0f} s) while drawing {len(drawn_elements)} elements. The shapes are kept, so a second call is faster; or draw less with `storey` or `around`.",
                 "seconds": round(time.monotonic() - started, 1),
                 "units": u.say,
-            }
+            }, None
         tri = v.uvd(got[e.id()].triangles)
         s = -tri[:, :, 2]  # keep depth >= 0: beyond the cut, or below it
         if view == "elevation":
@@ -867,38 +985,43 @@ def draw(
                 svg.append(_text(x1 + 1, y + 2.4, f"{say['model']:,} {u.length} ({say['feet_inches']})", 1.9))
     svg.append("</g>")
 
-    # The title block: what, the scale, the unit, the sheet and the source.
+    # The title block: what, the scale, the unit, the sheet and the source; on a plan set's sheet, its number too.
     ty = ph - MARGIN_MM - TITLE_MM + 4
     svg.append(f'<path d="M{MARGIN_MM / 2:g} {ty - 4:.2f}H{pw - MARGIN_MM / 2:g}" stroke="#000" stroke-width="0.25"/>')
-    sha = geometry.file_sha256(model_path)
-    source = f"Drawn from {os.path.basename(model_path) if model_path else 'a model made in this session'}" + (f" (sha256 {sha[:12]}…)" if sha else "")
-    if edits:
-        source += f", as edited in the session ({edits} change(s), not saved to that file)"
-    svg.append(_text(MARGIN_MM, ty + 2, what, 3.6, weight="bold"))
-    svg.append(_text(MARGIN_MM, ty + 7.5, f"Scale {scale_say(ratio)} on {paper_name}. The model's lengths are in {u.length_name}.", 2.6))
-    svg.append(_text(MARGIN_MM, ty + 12, f"{source}; flo2-ifc {geometry._version()}. Dark: cut. Outlined: seen beyond{' or below' if view == 'plan' else ''}." + (" Orange: highlighted." if hl_ids else ""), 2.1))
-    svg.extend(_scale_bars(pw - MARGIN_MM, ty - 1, ratio))
+    source, edited, sha = source_line(model_path, edits)
+    legend = f"Dark: cut. Outlined: seen beyond{' or below' if view == 'plan' else ''}." + (" Orange: highlighted." if hl_ids else "")
+    box = SHEET_BOX_MM if number else 0.0
+    bars_right = pw - MARGIN_MM - box
+    arrow_x = bars_right - _scale_bars_width(ratio) - 12 if number else pw - MARGIN_MM - 140
+    if not number:
+        svg.append(_text(MARGIN_MM, ty + 2, heading, 3.6, weight="bold"))
+        svg.append(_text(MARGIN_MM, ty + 7.5, f"Scale {scale_say(ratio)} on {paper_name}. The model's lengths are in {u.length_name}.", 2.6))
+        svg.append(_text(MARGIN_MM, ty + 12, f"{source}{', ' + edited if edited else ''}; flo2-ifc {geometry._version()}. {legend}", 2.1))
+    else:
+        # A plan set's sheet: its number in a box at the right, its north arrow beside its scale bars, and its words
+        # in shorter lines, each kept clear of the arrow and the bars, so a narrow (portrait) sheet's do not run under them.
+        room = (arrow_x - 7 if view == "plan" else bars_right - _scale_bars_width(ratio) - 3) - MARGIN_MM
+        lines = [
+            (heading, 3.6, "bold"),
+            (f"Scale {scale_say(ratio)} on {paper_name}.", 2.6, "normal"),
+            (f"{source}; flo2-ifc {geometry._version()}.", 2.1, "normal"),
+            *([(f"Drawn {edited}.", 2.1, "bold")] if edited else []),
+            *([(what.rstrip(".") + ".", 2.1, "normal")] if heading != what else []),
+            (f"Lengths in {u.length_name}. {legend}", 2.1, "normal"),
+        ]
+        for (words, size, weight), y in zip(lines, (2, 7.5, 11.5, 15.5, 19.5, 23.5)):
+            svg.append(_text(MARGIN_MM, ty + y, clip(words, room, size, _EM_BOLD if weight == "bold" else _EM), size, weight=weight))
+        svg.extend(sheet_box(pw, ph, number, set_name))
+    svg.extend(_scale_bars(bars_right, ty - 1, ratio))
     if view == "plan":
-        svg.extend(_north_arrow(pw - MARGIN_MM - 140, ty + 4, _true_north(model)))
+        svg.extend(_north_arrow(arrow_x, ty + 4, _true_north(model)))
     svg.append("</svg>")
     text = "\n".join(svg)
-
-    # 7. WRITE IT, and its picture.
-    import cairosvg
-
-    os.makedirs(os.path.dirname(os.path.abspath(stem)) or ".", exist_ok=True)
-    with open(stem + ".svg", "w", encoding="utf-8") as f:
-        f.write(text)
-    long_side = max(400, min(int(png_px), 6000))
-    px_w, px_h = (long_side, round(long_side * ph / pw)) if pw >= ph else (round(long_side * pw / ph), long_side)
-    png = cairosvg.svg2png(bytestring=text.encode("utf-8"), output_width=px_w, output_height=px_h, background_color="white")
-    with open(stem + ".png", "wb") as f:
-        f.write(png)
 
     out: dict[str, Any] = {
         "view": view,
         "what": what,
-        "drawn": {"svg": stem + ".svg", "png": stem + ".png", "svg_bytes": len(text.encode("utf-8")), "png_bytes": len(png), "png_px": [px_w, px_h]},
+        "title": heading,
         "sheet": {"paper": paper_name, "orientation": "landscape" if pw >= ph else "portrait", "size_mm": [pw, ph], "scale": scale_say(ratio), "ratio": ratio},
         "frame": {
             "min": [round(frame[0] / m_per_unit, u.decimals), round(frame[1] / m_per_unit, u.decimals)],
@@ -938,4 +1061,4 @@ def draw(
     out["source"] = {"model_file": os.path.basename(model_path) if model_path else None, "sha256": sha}
     out["seconds"] = round(time.monotonic() - started, 1)
     out["units"] = u.say
-    return out
+    return out, text

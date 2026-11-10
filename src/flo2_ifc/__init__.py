@@ -3,11 +3,12 @@
 The tools are IfcOpenShell's ifcmcp, from the ifcopenshell-mcp release
 pyproject.toml pins, served by flo2-ifc's own server on the MCP Python SDK 2.x,
 with flo2-ifc's readers for a whole building in front of seven of them and
-seventeen tools added (server.py, reading.py, geometry.py, drawing.py; since 0.5.0
+eighteen tools added (server.py, reading.py, geometry.py, drawing.py; since 0.5.0
 the IDS check and writer, checking.py, and buildingSMART's rules, rules.py;
 since 0.6.0 the building steps, building.py; since 0.10.0 what changed between
 two models, diffing.py, and a BCF 3.0 file of it, bcf_writing.py; since 0.12.0
-what the session's edits touched, edits.py). ``flo2-ifc`` runs
+what the session's edits touched, edits.py; since 0.13.0 a plan set bound into
+one PDF, plan_set.py). ``flo2-ifc`` runs
 it over stdio, and ``uvx --from git+https://github.com/flo2-connector/flo2-ifc
 flo2-ifc`` runs it with every dependency at the version pinned in
 pyproject.toml. The ``ifcmcp`` command the release also installs is upstream's

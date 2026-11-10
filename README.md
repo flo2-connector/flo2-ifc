@@ -24,7 +24,8 @@ since 0.3.0 **measures and drawings to scale** on the same layer. Since 0.4.0 **
 MCP Python SDK 2.x, serving ifcmcp's tools from upstream's published `ifcopenshell-mcp` rather than from a fork
 (below, "Where ifcmcp comes from"). Since 0.5.0 it **checks a model against an IDS and against buildingSMART's
 validation rules, and writes an IDS** (below, "Checks"). Since 0.10.0 it **records what changed between two models**,
-with IfcOpenShell's IfcDiff and a BCF 3.0 file (below, "What changed between two models").
+with IfcOpenShell's IfcDiff and a BCF 3.0 file (below, "What changed between two models"). Since 0.13.0 it **draws a
+plan set and binds it into one PDF** (below, "A plan set as one PDF").
 
 ## The readers for a whole building (since 0.2.0)
 
@@ -66,6 +67,7 @@ drawings of it to scale. Each tool reads the elements' triangle meshes, as IfcOp
 | `ifc_extent` `datum` | heights above a storey's level or a given height (`above_datum`) |
 | `ifc_distance` | the shortest gap between two elements' surfaces with the two closest points (exact over every corner, edge and triangle), the box gaps and the centres |
 | `ifc_draw` | a plan of a storey at a cut height, a section along a line, a grid line or through named elements, or an elevation of one side, as an SVG in millimetres of paper and a PNG, to a stated scale written on the sheet with the model's unit and a scale bar in metres and feet; `highlight` draws elements in orange |
+| `ifc_plan_set` (since 0.13.0) | a plan set: numbered sheets, each `ifc_draw`'s drawing with its number and title, after a cover sheet that lists them, bound into ONE PDF (below, "A plan set as one PDF") |
 
 Every measure answers in the model's unit, in metres (square, cubic) and in feet and inches (square, cubic feet), and
 carries `cite`: the model file's name and sha256, the elements' GlobalIds, the unit and the method, which flo2-calc
@@ -150,6 +152,58 @@ Measured on a large building model in the image under flo2's flags (1 CPU, 1 GiB
 8.0 s; a section, which makes the shapes of the whole building first, in two calls
 (30.0 s, partial, then 21.9 s), and 21.5 s once its shapes are kept; every measure 0.1 s or less once the shapes are
 made; memory at most about 481 MiB (sampled).
+
+## A plan set as one PDF (since 0.13.0)
+
+A person who had edited a building model through chats asked to "pull a PDF planset" (flo2's design
+1a97fc1f1de4d5d2, `req:a-chat-pulls-a-pdf-plan-set-of-a-designs-building-model`, 2026-11-09): numbered sheets of
+plans, elevations and sections drawn to scale from the model as it stands, a cover sheet listing them, kept as one
+PDF. `ifc_plan_set` (`src/flo2_ifc/plan_set.py`) draws one and writes `<output_path>.pdf` and each sheet's SVG,
+`<output_path>-<number>.svg`.
+
+**The sheets.** Each is the drawing `ifc_draw` makes (`drawing.sheet`, the same cut, scale bars and title block), with
+its sheet number, large, and the set's name in a box at the right of its title block, and its title over what it
+shows. With no `sheets` given the set is the conventional one:
+
+| Number | Sheet |
+|---|---|
+| A-001 | the cover: the set's name (by default the project's, as the model states it), the project and buildings as the model names them, the model file and its sha256, the date drawn, and every sheet by number, title and scale, with any sheet not drawn and why |
+| A-101 on | a plan of every storey, lowest first, at its 1.2 m cut; a storey that holds nothing with a shape gets none, and `notes` says so |
+| A-201 to A-204 | the north, east, south and west elevations |
+| A-301, A-302 | a north-south and an east-west section through the middle of the building (the middle of the box of every element of every storey, the line running a metre past it each way) |
+
+The plans, the elevations and the sections are each at ONE scale, the largest that fits every sheet of the kind: the
+smallest of the scales each would be drawn at alone. Or the caller gives the sheets, each `ifc_draw`'s own arguments
+with a `number` (default: by kind, A-101.. plans, A-201.. elevations, A-301.. sections) and a `title` (default: what
+it shows), drawn in the order given. `paper` is one for the whole set; `scale` is one for every sheet that names
+none. A sheet that cannot be drawn (no such storey, a scale too large for the paper) is named in `not_drawn` with its
+reason and listed on the cover, and the rest are bound; a sheet that gives `paper`, `output_path` or an argument
+`ifc_draw` does not take, a number given twice or the cover's, is refused before anything is drawn.
+
+**The PDF** is bound with cairo's own PDF surface (`cairocffi`, which cairosvg draws with; cairosvg alone writes a
+one-page PDF), so no new package is installed (one already installed is now pinned: "What is pinned and why"). Each
+sheet's SVG is drawn by cairosvg onto a cairo recording surface as soon as the sheet is drawn, and binding replays
+them, a page each: vector, its words as text in DejaVu Sans, each page the size and way round of its sheet, and the
+PDF's title the set's name. Drawing the SVGs is most of the cost (on the Clinic below, 9.0 s for 4.4 MB of SVG, and
+1.9 s to replay them), so it is spread over the calls that draw the sheets.
+
+**Time.** A set keeps to one call's time (`FLO2_IFC_SECONDS`), as `ifc_draw` does. What it has drawn is kept for the
+session, each sheet in memory, by the model, its generation (any edit, shape or reload forgets it), the session's
+edits and the set's own arguments, so the same call again goes on from the next sheet (`partial`, with `done` and
+`to_do`); an edit starts the set again. A sheet is not started when less time is left than the slowest sheet of the
+set took, and the last call keeps a second a MB of SVG for binding. Nothing is written until every sheet is drawn or
+refused. Measured on public samples, the default set on Tabloid, on one core of an Intel N95 laptop (2026-11-09):
+
+| Model | Sheets | Calls | Time | PDF |
+|---|---|---|---|---|
+| AC20-FZK-Haus (2.6 MB) | 9 | 1 | 8.8 s | 0.11 MB |
+| Duplex (2.4 MB) | 11 | 1 | 8.1 s | 0.24 MB |
+| Clinic_Architectural (13 MB) | 11 | 3 | 32.3, 28.5 and 10.9 s | 1.88 MB |
+| Schependomlaan (49 MB) | 13 | 3 | 27.8, 25.6 and 16.9 s | 0.57 MB |
+
+The first call of each makes every shape of the building; the rest are kept for the session as for `ifc_draw`. The
+process peaked at 267 MB (the Clinic) and 421 MB (Schependomlaan). flo2.io runs a session about 2.2 times slower, so
+a large model's set takes more calls there.
 
 ## Checks (since 0.5.0)
 
@@ -551,7 +605,8 @@ Every dependency is pinned exactly in `pyproject.toml`. That list is the set flo
 | `pytest==9.1.1` | `ifc_validate`'s `express_rules` runs IfcOpenShell's rule executor, which imports pytest's assertion rewriting (`ifcopenshell/express/rule_executor.py`). Without it that check fails with "No module named '_pytest'". The tests use it too. |
 | `shapely==2.2.0` | flo2-ifc's footprints and drawings join projected triangles with it. ifcopenshell 0.9.0 requires it, unpinned; flo2-ifc imports it itself, so it is pinned at the version that resolves. |
 | `pyvista==0.49.1`, `vtk==9.7.1` | `ifc_render` (since 0.7.0). ifcquery imports pyvista if it can and fails the tool otherwise; pyvista draws with VTK, which decides how a picture is drawn with no display. Their own dependencies (matplotlib, pillow, pooch, scooby, cyclopts) are transitive. They take the image from 660 MB to 1.55 GB (VTK's libraries are 565 MB, Mesa's LLVM 124 MB). |
-| `cairosvg==2.9.1` | `ifc_draw` renders its SVG to PNG with it. It loads the cairo library at run time: the image installs Debian's `libcairo2`, and `fonts-dejavu-core` for the words. Its own dependencies (cairocffi, cssselect2, tinycss2, defusedxml, pillow) are transitive. |
+| `cairosvg==2.9.1` | `ifc_draw` renders its SVG to PNG with it. It loads the cairo library at run time: the image installs Debian's `libcairo2`, and `fonts-dejavu-core` for the words. Its own dependencies (cssselect2, tinycss2, defusedxml, pillow) are transitive. |
+| `cairocffi==1.7.1` | Since 0.13.0: `ifc_plan_set` binds a set's sheets into one PDF with cairo's own PDF surface, which cairosvg draws with (cairosvg writes a one-page PDF only). cairosvg 2.9.1 requires it, unpinned; flo2-ifc imports it itself, so it is pinned at the version that resolves (its latest, 2026-11-09). Nothing new is installed. |
 | `ifcdiff==0.9.0` | `ifc_diff` (since 0.10.0): IfcOpenShell's own IfcDiff. LGPL-3.0-or-later. |
 | `deepdiff==9.1.0`, `orderly-set==5.5.0`, `cachebox==5.2.3` | ifcdiff leaves them unpinned, and they decide what it reports: deepdiff compares attributes and property sets and records a property change, orderly-set is the set ifcdiff imports from it, cachebox is deepdiff's cache. All MIT. |
 | `bcf-client==0.9.0`, `xsdata==26.10` | `ifc_write_bcf` (since 0.10.0): IfcOpenShell's own BCF library, and the XML binding its BCF 3.0 model is generated with, which decides what the file says. bcf-client's source files and upstream's `src/bcf/pyproject.toml` say LGPL-3.0-or-later; the 0.9.0 wheel's PyPI classifier still says GPLv3. xsdata is MIT. |
@@ -637,7 +692,7 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 ## The tests and the checks
 
-`python -m pytest` runs twenty-three test files:
+`python -m pytest` runs twenty-four test files:
 
 - `tests/test_refusals.py` (since 0.13.0) holds every refusal for a malformed call to the class: for each kind of
   guess the field made, through every tool that takes the thing guessed, the call is refused with nothing changed,
@@ -651,7 +706,7 @@ uv venv -p 3.12 && uv pip install '.[test]'
 
 - `tests/test_smoke.py` starts the installed `flo2-ifc` over stdio with the mcp 2.3.0 client. It checks that:
   - the server initializes as `ifc-mcp`, with instructions;
-  - it lists ifcmcp's 25 tools and flo2-ifc's seventeen, and the readers, measures, checks, building steps and the
+  - it lists ifcmcp's 25 tools and flo2-ifc's eighteen, and the readers, measures, checks, building steps and the
     record of what changed take their arguments;
   - `ifc_new` and then `ifc_summary` both answer;
   - a synthetic millimetre house (`tests/models.py`), opened with `ifc_load`, reads whole: its units, a page of the
@@ -662,11 +717,13 @@ uv venv -p 3.12 && uv pip install '.[test]'
     on it in one call (`ifc_add_wall`), in each frame; and it is rendered in 3D (`ifc_render`), which checks the image's off-screen
     OpenGL; and it is compared with an edited copy (`ifc_diff`, a forked child whose prints must not reach the MCP
     stream) and a BCF 3.0 file written of the change (`ifc_write_bcf`); and the two walls built are what
-    `ifc_edited` lists, and what `ifc_validate` with `scope: "edits"` checks (since 0.12.0).
+    `ifc_edited` lists, and what `ifc_validate` with `scope: "edits"` checks (since 0.12.0); and its whole plan set
+    is drawn and bound into one PDF of nine pages (`ifc_plan_set`, since 0.13.0), which checks the image's cairo writes
+    a PDF.
 - `tests/test_tool_list.py` starts it the same way and compares what it lists with flo2-ifc 0.3.1's list
   (`tests/tools-0.3.1.json`, read from 0.3.1 over stdio): the server's name and instructions, 0.3.1's 31 tools in
-  order (and only the three checks, the four building steps, `ifc_add_unit`, `ifc_diff`, `ifc_write_bcf` and
-  `ifc_edited` added since),
+  order (and only the three checks, the four building steps, `ifc_add_unit`, `ifc_diff`, `ifc_write_bcf`,
+  `ifc_edited` and `ifc_plan_set` added since),
   each one's input and output schemas, its description (by sha256, so ifcmcp's LGPL text is not copied here), and the
   reason each of ten failing ifcmcp calls gives. The seven tools renamed in 0.9.0 are held instead to taking every
   argument 0.3.1 took, under its name or as an alias, with its type and whether it is required, as is
@@ -687,6 +744,14 @@ uv venv -p 3.12 && uv pip install '.[test]'
   sizes are known (`models.measured_site()`): a slab over a footing counted once, an open mesh refused a volume, the
   clear distance between two walls, a plan to a scale measured off the SVG, sections along a line, a grid line and
   through named elements, an elevation, and a region.
+- `tests/test_plan_set.py` (since 0.13.0) draws plan sets of the synthetic house: the default set (the cover, a plan
+  of every storey in elevation order, the four elevations, two sections through the middle, numbered A-001 to A-302,
+  each kind at the largest scale that fits all of it), and sheets the caller gives; one paper for the set; each
+  sheet's number and title on it, and each sheet `ifc_draw`'s drawing with its number added; the cover naming the
+  project, building, file, sha256, date and every sheet; the PDF one vector page per sheet (no picture, its words as
+  text, read back from the PDF's own objects); a sheet not drawn named with why; every bad sheet refused with nothing
+  written; a set out of time going on from where it stopped, and an edit starting it again; the tool served and
+  reading the model only. On the public AC20-FZK-Haus when `FLO2_IFC_SAMPLES` names its folder.
 - `tests/test_openings.py` (since 0.8.0) measures and draws a wall with an opening and a door in it
   (`models.wall_with_a_door()`): its volume less the opening (2.622 m3), a section through the door that cuts the
   wall only above the opening, an elevation that shows the door, a plan cut that shows the gap, and a mesh kept per

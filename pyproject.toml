@@ -53,6 +53,12 @@ dependencies = [
   # A drawing's picture: the SVG rendered to PNG. It needs the cairo library,
   # which the Dockerfile installs in the image (libcairo2).
   "cairosvg==2.9.1",
+  # ifc_plan_set (src/flo2_ifc/plan_set.py, since 0.13.0) binds a plan set's
+  # sheets into ONE PDF with cairo's own PDF surface, which cairosvg draws
+  # with: cairosvg writes a one-page PDF only. cairosvg 2.9.1 already requires
+  # cairocffi, unpinned; flo2-ifc imports it itself now, so it is pinned here,
+  # at the version cairosvg 2.9.1 resolves to (its latest, 2026-11-09).
+  "cairocffi==1.7.1",
   # ifc_render (ifcquery's render module, ifcmcp's 3D picture): since 0.7.0,
   # when flo2's door began to offer it (flo2's design 1a97fc1f1de4d5d2,
   # dec:a-chat-renders-a-building-model-in-3d). ifcquery imports pyvista if it
