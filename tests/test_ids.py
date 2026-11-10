@@ -288,3 +288,75 @@ def test_a_large_models_check_keeps_to_its_time_and_goes_on_from_where_it_stoppe
     rest = C.check_ids(model, path, ids, start=first["next_start"], seconds=60)
     assert rest["complete"] is True and rest["checked"]["from"] == first["next_start"] and rest["checked"]["to"] == 40
     assert all(s["status"] == "failed" and s["failed_elements"] == 1200 for s in first["specifications"] + rest["specifications"])
+
+
+# THE REPORTS OF WHAT A CHECK FINISHED ARE KEPT WHEN WRITING THEM RUNS PAST THE CALL'S TIME
+# (fact:root-cause-an-ids-checks-finished-reports-are-thrown-away-when-their-writing-outruns-the-kill-2026-11-10).
+# The reports are about 80% of a large check's time, bounded only by a fixed guess (REPORT_FACTOR)
+# with a 10% margin, and the parent killed the child at exactly the budget, so a check slowed by
+# about half a second in its last 3 s lost the reports of every specification it had finished
+# (the timing test above failed on CI 2026-11-10). Now the child says when it has finished
+# checking, the parent gives its reports a grace (REPORT_GRACE of the budget), and a JSON report
+# once written counts whatever happens to the HTML. Each test slows the child's report writing by
+# a known amount (the fork inherits the patch). Observed failing on main 11583bd (see the PR).
+
+
+def _large(tmp_path):
+    m = models.building(walls=1200)
+    model, path = _kept(m, tmp_path)
+    specs = [
+        {"name": f"Check {i}", "applicability": WALLS, "requirements": [{"facet": "property", "property_set": "Pset_WallCommon", "property": "FireRating"}, {"facet": "attribute", "name": "Name", "value": {"pattern": "Wall [0-9]+"}}]}
+        for i in range(40)
+    ]
+    return model, path, _ids(tmp_path, specs)
+
+
+def _slow_html(monkeypatch, seconds: float) -> None:
+    from ifctester import reporter
+
+    plain = reporter.Html.to_file
+
+    def slow(self, *a, **k):
+        time.sleep(seconds)
+        return plain(self, *a, **k)
+
+    monkeypatch.setattr(reporter.Html, "to_file", slow)
+
+
+def test_the_reports_of_what_was_checked_are_kept_when_writing_them_runs_past_the_budget(tmp_path, monkeypatch):
+    model, path, ids = _large(tmp_path)
+    budget = 4.0
+    # 0.3 of the budget more in the report: past the budget on its own, inside the grace.
+    _slow_html(monkeypatch, 0.3 * budget)
+    t = time.monotonic()
+    r = C.check_ids(model, path, ids, report_path=str(tmp_path / "r"), seconds=budget)
+    took = time.monotonic() - t
+    assert r["complete"] is False and r["checked"]["to"] > 0
+    assert set(r["reports"]) == {"json", "html"}, r.get("reports_note")
+    assert (tmp_path / "r.json").is_file() and (tmp_path / "r.html").is_file()
+    assert took < budget * (1 + C.REPORT_GRACE) + 0.5, took
+
+
+def test_a_json_report_written_in_time_is_kept_when_the_html_is_not(tmp_path, monkeypatch):
+    model, path, ids = _large(tmp_path)
+    budget = 4.0
+    _slow_html(monkeypatch, 30.0)  # the HTML never finishes in the call
+    t = time.monotonic()
+    r = C.check_ids(model, path, ids, report_path=str(tmp_path / "r"), seconds=budget)
+    took = time.monotonic() - t
+    assert r["reports"] == {"json": str(tmp_path / "r.json")}, r
+    assert "HTML report" in r["reports_note"] and "JSON report" in r["reports_note"]
+    assert took < budget * (1 + C.REPORT_GRACE) + 0.5, took
+
+
+def test_a_check_of_every_specification_is_complete_when_only_its_html_report_is_cut_off(tmp_path, monkeypatch):
+    # A small check finishes every specification and writes its JSON well inside the call; only the HTML is cut
+    # off. It is complete, with nothing left to call again for.
+    m = models.building(walls=3)
+    model, path = _kept(m, tmp_path)
+    ids = _ids(tmp_path, [{"name": "Fire rating", "applicability": WALLS, "requirements": [{"facet": "property", "property_set": "Pset_WallCommon", "property": "FireRating"}]}])
+    budget = 2.0
+    _slow_html(monkeypatch, 30.0)
+    r = C.check_ids(model, path, ids, report_path=str(tmp_path / "r"), seconds=budget)
+    assert r["complete"] is True and r["next_start"] is None and r["checked"] == {"from": 0, "to": 1, "of": 1}
+    assert r["reports"] == {"json": str(tmp_path / "r.json")} and "note" not in r, r
