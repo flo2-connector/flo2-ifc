@@ -20,7 +20,10 @@ checker of our own:
 
 Both keep to one call's time (``reading.SECONDS``): the check runs in a forked
 child that is stopped at the limit, and a check that does not finish says how
-far it got and where to go on from (``start``), as ifc_validate does.
+far it got and where to go on from (``start``), as ifc_validate does. Once the
+child has finished checking, its reports get REPORT_GRACE of the budget more,
+and a JSON report once written is kept whatever happens to the HTML, so what a
+call checked is never thrown away for being written up a little late.
 """
 
 from __future__ import annotations
@@ -48,6 +51,13 @@ USE_OF_BUDGET = 0.9
 #: 0.28 s, JSON 0.82 s, HTML 0.68 s). The check starts no new specification
 #: once the reports of those it finished might not be written in time.
 REPORT_FACTOR = 6.0
+#: Once the child has finished checking, the share of the call's time its reports may run past
+#: the budget before it is stopped. The guess above was measured off by as much as 7% of the
+#: reports on one machine, and the reports are about 80% of a large check's time, so a slowdown
+#: of half a second in a 3 s call threw away the reports of every specification it had finished
+#: (fact:root-cause-an-ids-checks-finished-reports-are-thrown-away-when-their-writing-outruns-the-kill-2026-11-10).
+#: At reading.SECONDS (30 s) the call may take 39 s, inside the gateway's 60 s.
+REPORT_GRACE = 0.3
 
 FACETS = ("entity", "attribute", "property", "classification", "material", "part_of")
 CARDINALITIES = ("required", "optional", "prohibited")
@@ -151,11 +161,14 @@ def _spec_summary(index: int, spec) -> dict[str, Any]:
 # ---------------------------------------------------------------- checking a model
 
 
-def _run_child(model, ids_path: str, model_path: str | None, start: int, report_path: str | None, budget: float) -> tuple[list[dict[str, Any]], dict[str, Any] | None, bool]:
+def _run_child(model, ids_path: str, model_path: str | None, start: int, report_path: str | None, budget: float) -> tuple[list[dict[str, Any]], dict[str, Any] | None, bool, str | None]:
     """Check specifications from `start` in a forked child, which streams one
-    line per specification and a last line when its reports are written.
-    Returns the specifications' summaries, the last line (None if it never
-    came), and whether the child was stopped at the time limit."""
+    line per specification, a line when it has finished checking and starts its
+    reports, one when the JSON report is written, and a last line when both are.
+    The child is stopped at the budget, or, once it is writing its reports, at
+    the budget plus REPORT_GRACE of it. Returns the specifications' summaries,
+    the last line (None if it never came), whether the child was stopped at the
+    time limit, and the JSON report's path if it was written."""
     read_end, write_end = os.pipe()
     pid = os.fork()
     if pid == 0:  # the child
@@ -192,12 +205,16 @@ def _run_child(model, ids_path: str, model_path: str | None, start: int, report_
                 w.write((json.dumps({"spec": _spec_summary(i, spec)}, default=str) + "\n").encode())
             wrote: dict[str, Any] = {}
             if report_path and done:
+                # Checking is done: the parent gives the reports their grace from here.
+                w.write((json.dumps({"reporting": len(done)}) + "\n").encode())
                 from ifctester import reporter
 
                 ids.specifications = done
                 j = reporter.Json(ids)
                 j.report()
                 j.to_file(f"{report_path}.json")
+                # The JSON report holds every result: it counts once written, whatever happens to the HTML.
+                w.write((json.dumps({"wrote_json": f"{report_path}.json"}) + "\n").encode())
                 h = reporter.Html(ids)
                 h.report()
                 h.to_file(f"{report_path}.html")
@@ -213,7 +230,8 @@ def _run_child(model, ids_path: str, model_path: str | None, start: int, report_
             os._exit(code)
     os.close(write_end)
     buf = b""
-    deadline = time.monotonic() + max(0.0, budget)
+    began = time.monotonic()
+    deadline = began + max(0.0, budget)
     timed_out = False
     with os.fdopen(read_end, "rb", buffering=0) as r:
         while True:
@@ -228,6 +246,9 @@ def _run_child(model, ids_path: str, model_path: str | None, start: int, report_
             if not chunk:
                 break
             buf += chunk
+            if b'{"reporting"' in buf:
+                # It has finished checking: what it checked is reported unless the reports outrun the grace.
+                deadline = max(deadline, began + max(0.0, budget) * (1 + REPORT_GRACE))
     if timed_out:
         try:
             os.kill(pid, 9)
@@ -236,6 +257,7 @@ def _run_child(model, ids_path: str, model_path: str | None, start: int, report_
     os.waitpid(pid, 0)
     specs: list[dict[str, Any]] = []
     end: dict[str, Any] | None = None
+    json_written: str | None = None
     for line in buf.split(b"\n"):
         if not line.strip():
             continue
@@ -245,13 +267,15 @@ def _run_child(model, ids_path: str, model_path: str | None, start: int, report_
             continue  # a line cut off when the child was stopped
         if "spec" in said:
             specs.append(said["spec"])
+        elif "wrote_json" in said:
+            json_written = said["wrote_json"]
         elif "end" in said:
             end = said["end"]
         elif "failed" in said:
             if said.get("refused"):
                 raise IdsRefused(said["failed"].split(": ", 1)[-1])
             raise RuntimeError(f"the IDS check could not run: {said['failed']}")
-    return specs, end, timed_out
+    return specs, end, timed_out, json_written
 
 
 def check_ids(
@@ -282,11 +306,12 @@ def check_ids(
     started = time.monotonic()
     budget = reading.SECONDS if seconds is None else seconds
     if hasattr(os, "fork"):
-        specs, end, timed_out = _run_child(model, ids_path, model_path, start, report_path or None, budget)
+        specs, end, timed_out, json_written = _run_child(model, ids_path, model_path, start, report_path or None, budget)
     else:  # pragma: no cover - flo2-ifc runs on Linux
         raise RuntimeError("the IDS check needs os.fork")
     checked_to = start + len(specs)
-    complete = checked_to >= total and end is not None
+    # Every specification checked and the JSON report written is a complete check: only the HTML was cut off.
+    complete = checked_to >= total and (end is not None or json_written is not None)
     failed = [s for s in specs if s["status"] == "failed"]
     out: dict[str, Any] = {
         "ids": {**_file_entry(ids_path), "title": ids.info.get("title"), "specifications": total},
@@ -320,11 +345,14 @@ def check_ids(
         )
     if end and end.get("wrote"):
         out["reports"] = end["wrote"]
+    elif json_written:
+        out["reports"] = {"json": json_written}
+        out["reports_note"] = f"The HTML report could not be written in this call's time ({budget:.0f} s and its {REPORT_GRACE:.0%} grace for reports); the JSON report holds every result of what was checked."
     elif report_path:
         out["reports"] = {}
         out["reports_note"] = "No report was written: the check did not finish a specification in this call's time." if not specs else "No report was written: the check was stopped before it could write them."
     if not complete:
-        why = "the time limit stopped it" if timed_out else f"it starts no new specification once the rest of the call's {budget:.0f} s may not hold it and its reports"
+        why = "the time limit stopped it" if timed_out and not json_written else f"it starts no new specification once the rest of the call's {budget:.0f} s may not hold it and its reports"
         out["note"] = (
             f"Partial: specifications {start} to {checked_to - 1 if specs else start - 1} of {total} (numbered from 0) were checked ({why}). "
             f"Call again with start {checked_to} to check on; `passed` covers only what was checked."
