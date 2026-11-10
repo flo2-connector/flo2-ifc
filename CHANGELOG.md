@@ -41,6 +41,19 @@ now refused where it was dropped, so a minor release. flo2 re-pins to take it, a
   the thing guessed, refused with nothing changed, no library words, the corrected form in the first 600 characters,
   and that form answering. On 0.12.1 (e72812b): 34 of its 35 tests failed; the control passed.
 
+- **An IDS check keeps the reports of what it checked when writing them runs a little past the call's time**
+  (`src/flo2_ifc/checking.py`). Root-caused in flo2-ifc's design,
+  `fact:root-cause-an-ids-checks-finished-reports-are-thrown-away-when-their-writing-outruns-the-kill-2026-11-10`:
+  ifctester's JSON and HTML reports are about 80% of a large check's time and were bounded only by a fixed guess
+  (six times the checking) with a 10% margin. The child was killed at exactly the budget, so a slowdown of about half
+  a second in a 3 s call threw away the reports of every specification it had finished, the JSON already written
+  included. tests/test_ids.py's timing test failed so on CI on 2026-11-10. Now the child says when it has finished
+  checking, its reports get `REPORT_GRACE` (0.3) of the budget more (39 s at the default 30 s, inside flo2's 60 s), and
+  a JSON report once written is kept with a note when the HTML is not; a check of every specification whose HTML
+  alone was cut off reads complete, not "call again". Three tests slow the child's report writing on purpose: past the
+  budget but inside the grace (both reports kept), past the grace (the JSON kept), and a whole check whose HTML is cut
+  off (complete). All three fail on main 11583bd.
+
 ## 0.12.1 (unreleased)
 
 A room made in an IFC2X3 model is valid. `ifc_add_space` gave IfcOpenShell the predefined type `INTERNAL`, which
