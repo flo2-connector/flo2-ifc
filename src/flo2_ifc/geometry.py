@@ -36,7 +36,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import ifcopenshell
-import ifcopenshell.util.selector
 import numpy as np
 
 from flo2_ifc import reading
@@ -206,7 +205,7 @@ def choose(model: ifcopenshell.file, selector: str = "", element_ids: str | list
     if text.strip():
         said.append(f"element_ids {text.strip()}")
     if selector.strip():
-        for e in ifcopenshell.util.selector.filter_elements(model, selector):
+        for e in reading.selected(model, selector):
             found[e.id()] = e
         said.append(selector.strip())
     if not said:

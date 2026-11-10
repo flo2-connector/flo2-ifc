@@ -59,7 +59,7 @@ from typing import Any
 
 import ifcopenshell
 
-from flo2_ifc import geometry, reading
+from flo2_ifc import geometry, reading, refusals
 
 #: What IfcDiff can compare (its RELATIONSHIP_TYPE), and ``placement``, IfcDiff's quick geometry check, in the order
 #: each is asked.
@@ -582,10 +582,13 @@ def diff(
     if selector:
         from ifcopenshell.util import selector as selectors
 
+        problem = refusals.selector_problem(selector, model.schema)
+        if problem:
+            raise DiffRefused(problem)
         try:
             selectors.filter_elements(model, selector)
-        except Exception as e:  # noqa: BLE001 - the selector's own parse error
-            raise DiffRefused(f"`selector` {selector!r} is not a selector IfcOpenShell reads: {' '.join(str(e).split())[:300]}") from e
+        except Exception as e:  # noqa: BLE001 - one it reads and cannot answer
+            raise DiffRefused(f"`selector` {selector!r} could not be answered: {' '.join(str(e).split())[:300]}") from e
     started = time.monotonic()
     budget = (reading.SECONDS if seconds is None else seconds) * USE_OF_BUDGET
     this = _model_entry(model, model_path, edits)

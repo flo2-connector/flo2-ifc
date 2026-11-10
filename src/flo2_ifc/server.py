@@ -62,6 +62,14 @@ start. ``ifc_validate`` names each issue's element and attribute, and with
 ``scope: "edits"`` checks only what the edits touched and their neighbours
 (reading.validate); ``ifc_edited`` lists the record.
 
+Since 0.13.0 a malformed call is refused before the tool runs with what was
+wrong and the call meant, built from the caller's own input (refusals.py,
+``Server.call_tool``): an argument a tool does not take (refused, where it was
+dropped), and a selector, function path or editing module it cannot read; the
+SDK's own argument check is said in the tool's words, and ifcedit's reason an
+edit did not run names what the function takes (``_teach_edits``). Until then
+every such refusal was the library's own text, passed on by the one catch.
+
 Each replacement keeps its tool's name and adds only optional arguments, so a
 caller of ifcmcp's tool still calls it the same way. These are flo2-ifc's, not
 ifcmcp's. Any of them that ifcmcp itself would want is offered to IfcOpenShell
@@ -74,7 +82,7 @@ import functools
 import inspect
 from typing import Any
 
-from flo2_ifc import bcf_writing, building, checking, diffing, drawing, edits, geometry, reading, rules
+from flo2_ifc import bcf_writing, building, checking, diffing, drawing, edits, geometry, reading, refusals, rules
 
 #: The tools this module replaces or adds, by name.
 REPLACED = ("ifc_summary", "ifc_tree", "ifc_select", "ifc_info", "ifc_relations", "ifc_validate", "ifc_quantify")
@@ -282,6 +290,38 @@ def _reason_kept(fn):
     return call
 
 
+def _argument_errors(error: Exception, tool: str) -> list[dict[str, Any]] | None:
+    """The MCP SDK's own check of `tool`'s arguments (pydantic's errors) behind `error`, or None when the failure was
+    something else: the check is pydantic's validation of the model the SDK names ``<tool>Arguments``."""
+    cause = error.__cause__
+    if type(cause).__name__ != "ValidationError" or getattr(cause, "title", None) != f"{tool}Arguments":
+        return None
+    try:
+        return list(cause.errors())
+    except Exception:  # noqa: BLE001 - not pydantic's after all
+        return None
+
+
+def _teach_edits(session: Any) -> None:
+    """ifcedit's reason an edit did not run, with what the function takes (refusals.edit_error): a parameter it does
+    not take answered with its parameters and the one meant, a function or module that does not exist with what there
+    is. The edit is still refused as ifcedit refuses it, with nothing changed; only its reason says more. Innermost of
+    the wrappers on ifc_edit, so what _hold_units and _watch_changes see is ifcedit's answer with its reason
+    extended."""
+    inner = getattr(session, "ifc_edit", None)
+    if inner is None:
+        return
+
+    @functools.wraps(inner)
+    def edit(function_path: str, params: Any = "{}"):
+        out = inner(function_path=function_path, params=params)
+        if isinstance(out, dict) and out.get("ok") is False and isinstance(out.get("error"), str):
+            out = {**out, "error": refusals.edit_error(function_path, out["error"])}
+        return out
+
+    session.ifc_edit = edit
+
+
 def _hold_units(session: Any) -> None:
     """Hold ifc_edit's pset.edit_pset and pset.edit_qto to a declared unit (building.py, "A UNIT IS DECLARED BEFORE A
     VALUE IN IT IS WRITTEN"): a measured value they would store with no unit is not written, and the reply says how to
@@ -354,22 +394,60 @@ def build_server() -> Any:
 
     class Server(MCPServer):
         """MCPServer, taking each tool's old argument names (ALIASES) as its new ones, and the names a reply gives an
-        element (REPLY_NAMES) wherever a tool takes one."""
+        element (REPLY_NAMES) wherever a tool takes one; and since 0.13.0 refusing, before the tool runs, an argument
+        it does not take and a selector, function path or module it cannot read, each with the form to copy
+        (refusals.py), and saying the SDK's own argument check in the tool's words."""
 
         reply_names: dict[str, tuple[str, ...]] | None = None
+        served: dict[str, tuple[dict[str, Any], str]] | None = None
 
         async def call_tool(self, name, arguments, context=None):
-            if self.reply_names is None:
-                # From the served schemas, once: what each tool that takes `element_id` takes it as, ifcmcp's and ours.
-                self.reply_names = {t.name: reply_names_taken(t.input_schema) for t in await self.list_tools()}
+            if self.reply_names is None or self.served is None:
+                # From the served schemas, once: what each tool that takes `element_id` takes it as, ifcmcp's and ours,
+                # and each tool's arguments and description, for its refusals.
+                tools = await self.list_tools()
+                self.reply_names = {t.name: reply_names_taken(t.input_schema) for t in tools}
+                self.served = {t.name: (t.input_schema or {}, t.description or "") for t in tools}
             try:
                 arguments = canonical_arguments(name, arguments, self.reply_names.get(name, ()))
             except ValueError as e:
                 raise ToolError(str(e)) from e
-            return await super().call_tool(name, arguments, context)
+            if name not in self.served:
+                return await super().call_tool(name, arguments, context)
+            schema, description = self.served[name]
+            problem = refusals.arguments_problem(name, schema, description, arguments) or _values_problem(arguments)
+            if problem:
+                raise ToolError(problem)
+            try:
+                return await super().call_tool(name, arguments, context)
+            except ToolError as e:
+                errors = _argument_errors(e, name)
+                if errors is None:
+                    raise
+                raise ToolError(refusals.validation_problem(name, schema, description, errors)) from e
+
+    def _values_problem(arguments: dict[str, Any]) -> str | None:
+        """Why a value the tool would read is refused before it runs (refusals.py): a selector, by the open model's
+        schema; a function path; an editing module."""
+        model = getattr(session, "model", None)
+        for argument, value in arguments.items():
+            if not isinstance(value, str) or not value.strip():
+                continue
+            if argument == "selector":
+                problem = refusals.selector_problem(value, getattr(model, "schema", None))
+            elif argument == "function_path":
+                problem = refusals.function_path_problem(value)
+            elif argument == "module":
+                problem = refusals.module_problem(value.strip())
+            else:
+                continue
+            if problem:
+                return problem
+        return None
 
     recorded = _ifcmcp_tools()
     session = _session_of(recorded)
+    _teach_edits(session)
     _hold_units(session)
     watched = _watch_changes(session)
     record = edits.Record()
@@ -441,7 +519,13 @@ def build_server() -> Any:
         Selectors: ``IfcWall``; ``IfcWall, IfcDoor``; ``IfcWall, Name = "W1"``;
         ``type = "Concrete Wall"``; ``material = "Concrete"``; and BY PLACE,
         ``IfcDoor, location = "Level 1"`` (the doors on the storey named
-        Level 1; a space or building name works too).
+        Level 1; a space or building name works too). A name that CONTAINS
+        text: ``IfcSpace, Name *= "102"`` (case-sensitive), or a regex,
+        matched from the start: ``IfcSpace, Name = /.*102/``. EITHER of two
+        selections: ``IfcFooting + IfcPile``. NOT: ``IfcElement, ! IfcWall``.
+        An attribute is capitalised as IFC names it (``Name``, not ``name``);
+        text goes in double quotes. A selector this cannot read is refused
+        with the one meant: copy it.
 
         :param selector: The selector (until 0.9.0 ``query``, still taken).
         :param offset: Where the page starts (the reply's ``page.next_offset``).
