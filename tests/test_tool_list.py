@@ -22,7 +22,8 @@ the IDS writer and buildingSMART's rules; since 0.6.0 four more, the building
 steps (a wall, a slab, a roof and a room, each in one call); since 0.9.0 one
 more, ``ifc_add_unit``; since 0.10.0 two more, ``ifc_diff`` (what changed between
 two models, with IfcDiff) and ``ifc_write_bcf`` (a BCF 3.0 file); since 0.12.0 one more, ``ifc_edited`` (what the
-session's edits touched). Every tool 0.3.1 listed is still listed, in the same order, and nothing else is new.
+session's edits touched); since 0.13.0 one more, ``ifc_plan_set`` (numbered sheets to scale bound into one PDF). Every
+tool 0.3.1 listed is still listed, in the same order, and nothing else is new.
 
 Since 0.9.0 seven of flo2-ifc's tools name their arguments by one rule
 (server.py, ``ARGUMENT_NAMES``) and their descriptions say so, and ifc_summary,
@@ -51,7 +52,7 @@ from tests.test_smoke import flo2_ifc_command
 
 BEFORE = json.loads((Path(__file__).parent / "tools-0.3.1.json").read_text())
 #: The tools added since 0.3.1, in the order they are listed after its tools.
-NEW_SINCE = ["ifc_check_ids", "ifc_write_ids", "ifc_check_rules", "ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space", "ifc_add_unit", "ifc_diff", "ifc_write_bcf", "ifc_edited"]
+NEW_SINCE = ["ifc_check_ids", "ifc_write_ids", "ifc_check_rules", "ifc_add_wall", "ifc_add_slab", "ifc_add_roof", "ifc_add_space", "ifc_add_unit", "ifc_diff", "ifc_write_bcf", "ifc_edited", "ifc_plan_set"]
 #: Since 0.9.0: tools whose arguments were renamed (ALIASES) or now also take a GlobalId (element_id).
 RENAMED = ["ifc_select", "ifc_info", "ifc_relations", "ifc_extent", "ifc_footprint", "ifc_volume", "ifc_distance"]
 #: Since 0.12.0: tools that take a new optional argument (ifc_validate's `scope`, "edits" checking only what the

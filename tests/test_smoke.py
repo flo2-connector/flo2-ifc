@@ -54,6 +54,8 @@ EXPECTED_TOOLS = {
     "ifc_diff", "ifc_write_bcf",
     # since 0.12.0: what the session's edits touched (src/flo2_ifc/edits.py), which ifc_validate's scope "edits" checks
     "ifc_edited",
+    # since 0.13.0: a plan set, numbered sheets to scale bound into one PDF (src/flo2_ifc/plan_set.py)
+    "ifc_plan_set",
 }
 
 #: The optional arguments flo2-ifc's readers add to ifcmcp's tools.
@@ -76,6 +78,7 @@ ADDED_ARGUMENTS = {
     "ifc_diff": {"other_path", "output_path", "other_is", "compare", "selector", "offset", "limit"},
     "ifc_write_bcf": {"description", "output_path"},
     "ifc_edited": {"how", "element_type", "offset", "limit"},
+    "ifc_plan_set": {"output_path", "sheets", "paper", "scale", "title"},
 }
 
 #: The arguments each building step requires.
@@ -176,6 +179,9 @@ async def round_trip() -> dict:
             out["bcf"] = json.loads(text_of(await session.call_tool("ifc_write_bcf", {"description": json.dumps(bcf), "output_path": f"{tempfile.gettempdir()}/flo2-ifc-smoke-changes"})))
             # Written where the confined image can write: its /tmp, as flo2's slot gives it an outbox.
             out["draw"] = json.loads(text_of(await session.call_tool("ifc_draw", {"output_path": f"{tempfile.gettempdir()}/flo2-ifc-smoke-plan", "storey": "GROUND"})))
+            # Since 0.13.0: the house's whole plan set, bound into one PDF with cairo (so the image's cairo writes a PDF).
+            planned = await session.call_tool("ifc_plan_set", {"output_path": f"{tempfile.gettempdir()}/flo2-ifc-smoke-set"})
+            out["plan_set"] = (planned.is_error, "".join(getattr(b, "text", "") for b in planned.content))
             # An IDS written, then the house checked against it, then buildingSMART's rules.
             ids_at = f"{tempfile.gettempdir()}/flo2-ifc-smoke-req"
             out["write_ids"] = json.loads(text_of(await session.call_tool("ifc_write_ids", {"description": json.dumps(SMOKE_IDS), "output_path": ids_at})))
@@ -209,10 +215,10 @@ def test_initialize_names_the_server_and_gives_instructions(served):
     assert served["instructions"] and "ifc_load" in served["instructions"]
 
 
-def test_list_tools_gives_ifcmcps_25_tools_and_flo2_ifcs_seventeen(served):
+def test_list_tools_gives_ifcmcps_25_tools_and_flo2_ifcs_eighteen(served):
     names = served["tools"]
-    assert len(names) == 42, names
-    assert len(set(names)) == 42, names
+    assert len(names) == 43, names
+    assert len(set(names)) == 43, names
     assert set(names) == EXPECTED_TOOLS
     for name in ("ifc_load", "ifc_summary", "ifc_edit", "ifc_plot", "ifc_render"):
         assert name in names
@@ -224,7 +230,7 @@ def test_the_readers_take_their_paging_and_filter_arguments(served):
         assert props == wanted, (tool, props)
         required = set(served["schemas"][tool].get("required", []))
         own = {"ifc_check_ids": {"ids_path"}, "ifc_write_ids": {"description", "output_path"}, "ifc_diff": {"other_path", "output_path"},
-               "ifc_write_bcf": {"description", "output_path"}, **BUILD_REQUIRED}.get(tool, set())
+               "ifc_write_bcf": {"description", "output_path"}, "ifc_plan_set": {"output_path"}, **BUILD_REQUIRED}.get(tool, set())
         assert required <= ({"selector", "element_id"} | own) - ({"element_id"} if tool in ("ifc_extent", "ifc_footprint", "ifc_volume") else set()), (tool, required)
 
 
@@ -282,6 +288,19 @@ def test_the_house_is_measured_and_drawn_through_the_server(served):
     drawn = served["draw"]
     assert drawn["view"] == "plan" and drawn["drawn"]["png_bytes"] > 1000, drawn
     assert drawn["sheet"]["scale"].startswith("1:") and drawn["elements"]["cut"] == 3, drawn
+
+
+def test_the_houses_plan_set_is_drawn_and_bound_into_one_pdf_through_the_server(served):
+    """Since 0.13.0: a cover, the two storeys' plans, four elevations and two sections, as one PDF and nine SVGs."""
+    is_error, text = served["plan_set"]
+    assert not is_error, text
+    out = json.loads(text)
+    assert out["complete"] is True, out
+    assert [s["number"] for s in out["sheets"]] == ["A-001", "A-101", "A-102", "A-201", "A-202", "A-203", "A-204", "A-301", "A-302"]
+    assert out["set"]["pages"] == 9 and out["written"]["pdf"].endswith("flo2-ifc-smoke-set.pdf") and out["written"]["pdf_bytes"] > 1000
+    assert len(out["written"]["svgs"]) == 9 and out["source"]["model_file"] == "house.ifc"
+    if not os.environ.get("FLO2_IFC_SERVER"):  # the image writes inside its own /tmp
+        assert Path(out["written"]["pdf"]).read_bytes()[:5] == b"%PDF-"
 
 
 def test_an_ids_is_written_and_the_house_checked_against_it_through_the_server(served):
