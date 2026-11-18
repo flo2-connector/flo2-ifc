@@ -104,6 +104,15 @@ of the other's drawn area lies inside it and the other is the smaller (`HOLDS_SH
 hair past its room's edge still counts, and rooms that merely overlap do not. The names of rooms that hold none stay
 where they always were. A section names the rooms it cuts the same way.
 
+**An area outline is not a room** (since 0.13.0). A gross floor area or a rentable area traced over the rooms is a
+measurement, not a room, and a drawing neither outlines nor names it: the reply lists each one left out in
+`area_outlines_not_drawn` (its id, name, GlobalId and `why`) and says so in `notes`; a plan set passes the list
+through on each sheet. A model marks one in either of two ways, and only these, never by its name: IFC4's own,
+`PredefinedType` GFA on the space or its type; or Revit's, whose IFC exporter writes each area of an area plan as an
+IfcSpace with no predefined type and its own property set "Other" reading `Category` "Areas" (a room reads "Rooms").
+Found 2026-11-18 on a real plan set drawn from a Revit 2024 export, whose six gross-area outlines were outlined and
+named as rooms, their names over real units and a stair, and whose roof plan showed nothing but three of them.
+
 **A room's area on a plan is the one the model stores** (since 0.5.0), when it stores one: the authoring tool's own
 number, `Qto_SpaceBaseQuantities.NetFloorArea` first, then an `Area` in another set (a Revit export keeps it in
 "Dimensions", which is looked at first). It is read in the model's area unit. Only a room that stores no area is

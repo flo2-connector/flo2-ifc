@@ -35,6 +35,16 @@ removed: a minor release. flo2 re-pins to take it.
 - **Measured** on public samples, the default set on one Intel N95 core: AC20-FZK-Haus in one call (8.8 s, 9 pages),
   the Duplex in one (8.1 s, 11), Clinic_Architectural in three (11 pages, 1.88 MB), Schependomlaan in three (13
   pages); README.md, "A plan set as one PDF".
+- **An area outline is not drawn as a room** (`drawing.area_outline_why`). Found 2026-11-18 on a real plan set from a
+  Revit 2024 export: its six gross-floor-area outlines were outlined and named on every plan as rooms, their names
+  over real units and a stair, and its roof plan showed nothing but three of them. A space the model marks as an area
+  outline, IFC4's `PredefinedType` GFA (on it or its type) or Revit's `Other.Category` "Areas", is now neither
+  outlined nor named, in `ifc_draw` and in a plan set's sheets; the reply lists each in `area_outlines_not_drawn`
+  with how the model marks it, and `notes` says so. Never by its name: a room named "GFA storage" is a room.
+  `ifc_draw`'s description is unchanged (its tool list is held to 0.3.1's). Tests: `tests/test_drawing.py`
+  (`test_an_area_outline_is_neither_outlined_nor_named_as_a_room`, `test_a_room_is_drawn_whatever_its_name`) and
+  `tests/test_plan_set.py` (`test_a_plan_sheet_says_which_area_outlines_it_left_out`), on a synthetic floor
+  (`models.rooms_and_area_outlines`); both new checks were seen failing on the unfixed code.
 - **The skill**'s `references/drawing.md` teaches the plan set (in flo2, the door's step `draw_plan_set`), and says
   it is a conceptual set drawn from the model, not a permit set; SKILL.md names it. Both plugin manifests and the
   skill's compatibility line read 0.13.0.

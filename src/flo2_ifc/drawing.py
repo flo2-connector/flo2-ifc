@@ -155,6 +155,29 @@ def storey_elements(storey: ifcopenshell.entity_instance) -> tuple[list[ifcopens
     return elements, spaces
 
 
+def area_outline_why(sp: ifcopenshell.entity_instance) -> str | None:
+    """Why a space is an AREA OUTLINE rather than a room, or None for a room.
+
+    An area outline is a measurement traced over rooms (a gross floor area, a
+    rentable area), not a room, and a drawing does not outline or name it as
+    one. A model says a space is one in either of two ways, and only by what it
+    says the space IS, never by its name:
+
+    - IFC4's own: PredefinedType GFA (gross floor area), on the space or its type;
+    - Revit's: its IFC exporter writes each area of an area plan as an IfcSpace
+      whose PredefinedType says nothing, and marks it only in Revit's own
+      property set "Other", Category "Areas" (a room reads "Rooms").
+
+    Found 2026-11-18 on a real plan set from a Revit 2024 export, whose six
+    gross-area outlines were drawn and named as rooms over the real ones."""
+    for e in (sp, ifcopenshell.util.element.get_type(sp)):
+        if e is not None and getattr(e, "PredefinedType", None) == "GFA":
+            return "PredefinedType GFA"
+    if (ifcopenshell.util.element.get_psets(sp).get("Other") or {}).get("Category") == "Areas":
+        return "Revit's Category: Areas"
+    return None
+
+
 def storeys_named(model: ifcopenshell.file, text: str) -> list[ifcopenshell.entity_instance]:
     if not text.strip():
         return list(model.by_type("IfcBuildingStorey"))
@@ -754,6 +777,10 @@ def sheet(
         if storey.strip():
             what += f", {', '.join(s.Name or '' for s in sts)}"
     heading = title.strip() or what
+    area_outlines = [(sp, why) for sp in spaces if (why := area_outline_why(sp))]
+    if area_outlines:
+        left_out = {sp.id() for sp, _ in area_outlines}
+        spaces = [sp for sp in spaces if sp.id() not in left_out]
 
     # 2. THE MESHES (kept between calls: a second drawing does not make them again).
     todo = elements + [s for s in spaces] + [e for e in highlighted if e.id() not in {x.id() for x in elements}]
@@ -1045,6 +1072,15 @@ def sheet(
         out["looking"] = {"toward": [round(float(x), 4) for x in v.toward[:2]], "right": [round(float(x), 4) for x in v.right[:2]]}
     if room_areas:
         out["room_areas"] = room_areas
+    if area_outlines:
+        out["area_outlines_not_drawn"] = [
+            {"id": sp.id(), "name": _room_name(sp), "global_id": getattr(sp, "GlobalId", None), "why": why} for sp, why in area_outlines
+        ]
+        notes.append(
+            f"Not drawn as rooms: {len(area_outlines)} area outline(s) ({', '.join(_room_name(sp) or f'#{sp.id()}' for sp, _ in area_outlines[:6])}"
+            f"{', ...' if len(area_outlines) > 6 else ''}). An area outline is a measurement traced over rooms (a gross floor area), "
+            "not a room; `area_outlines_not_drawn` says how the model marks each."
+        )
     if unlabelled:
         out["unlabelled_rooms"] = unlabelled
         for r in unlabelled:
