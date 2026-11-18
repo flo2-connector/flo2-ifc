@@ -369,3 +369,27 @@ def through_two_storeys(schema: str = "IFC4") -> ifcopenshell.file:
     partition = made("IfcWall", "Loft partition", 3.0, 2.4, 0.1, x=1.0, y=2.0, z=TWO_STOREYS["loft_z"])
     run("spatial.assign_container", f, relating_structure=loft, products=[partition])
     return f
+
+
+def rooms_and_area_outlines(schema: str = "IFC4") -> ifcopenshell.file:
+    """rooms_on_a_floor with two rooms side by side, "Unit 1" and "Unit 2", each 6 x 6 m, and two spaces over the
+    whole floor that are NOT rooms but area outlines, the two ways a model says so:
+
+    - "FLOOR GFA", as Revit's IFC exporter writes an area from an area plan: an IfcSpace whose PredefinedType says
+      nothing, with Revit's own property set "Other" reading Category "Areas", assigned to an IfcGroup named after
+      its area scheme ("Gross Building");
+    - "LEVEL GFA", as IFC4 says it: PredefinedType GFA (gross floor area)."""
+    run = ifcopenshell.api.run
+    f = rooms_on_a_floor([("Unit 1", (0, 0, 6, 6)), ("Unit 2", (6, 0, 12, 6)), ("FLOOR GFA", (0, 0, 12, 6)), ("LEVEL GFA", (0, 0, 12, 6))], schema=schema)
+    spaces = {s.Name: s for s in f.by_type("IfcSpace")}
+    revit_area = spaces["FLOOR GFA"]
+    pset = run("pset.add_pset", f, product=revit_area, name="Other")
+    run("pset.edit_pset", f, pset=pset, properties={"Category": "Areas", "Area Type": "Gross Building Area"})
+    group = run("group.add_group", f, name="Gross Building")
+    run("group.assign_group", f, products=[revit_area], group=group)
+    for name in ("Unit 1", "Unit 2"):
+        room = run("pset.add_pset", f, product=spaces[name], name="Other")
+        run("pset.edit_pset", f, pset=room, properties={"Category": "Rooms"})
+    if schema != "IFC2X3":
+        spaces["LEVEL GFA"].PredefinedType = "GFA"
+    return f

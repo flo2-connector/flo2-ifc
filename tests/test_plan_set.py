@@ -443,3 +443,16 @@ def test_a_sheet_is_the_drawing_ifc_draw_makes_with_its_number_and_title_added(d
         assert drawn(one) == drawn(other) and drawn(one), sheet["number"]
         assert not [g for g in one.iter(f"{SVG}g") if g.get("id") == "sheet"], "a drawing alone has no sheet number"
         assert [g for g in other.iter(f"{SVG}g") if g.get("id") == "sheet"], "a set's sheet has its number"
+
+
+def test_a_plan_sheet_says_which_area_outlines_it_left_out(tmp_path):
+    # The plan set passes each sheet's area_outlines_not_drawn through, as it passes unlabelled_rooms: the
+    # person reading the set's reply learns the gross-area outlines were left off the plans, and how the model
+    # marks each (tests/test_drawing.py, test_an_area_outline_is_neither_outlined_nor_named_as_a_room).
+    m = models.rooms_and_area_outlines()
+    path = str(tmp_path / "areas.ifc")
+    m.write(path)
+    out = P.plan_set(m, str(tmp_path / "areas set"), model_path=path)
+    plan = next(s for s in out["sheets"] if s.get("view") == "plan")
+    assert sorted(a["name"] for a in plan["area_outlines_not_drawn"]) == ["FLOOR GFA", "LEVEL GFA"]
+    assert plan["elements"]["rooms"] == 2
