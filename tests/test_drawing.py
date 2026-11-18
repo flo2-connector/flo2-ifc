@@ -326,3 +326,34 @@ def test_a_stored_area_is_read_in_the_models_area_unit(tmp_path):
     room = out["room_areas"][0]
     assert room["area"]["square_metres"] == pytest.approx(30.0) and room["area"]["model"] == pytest.approx(30_000_000.0)
     assert "30.0 m²" in texts(svg_of(out))
+
+
+# ---------------------------------------------------------------- an area outline is not a room
+
+
+def test_an_area_outline_is_neither_outlined_nor_named_as_a_room(tmp_path):
+    # Found 2026-11-18 on a real plan set (flo2-ifc 0.13.0, a Revit 2024 export): the model's gross-floor-area
+    # outlines ("10 FLOORS 2-4 GFA", "12 1ST FLOOR GFA") were outlined and named on every plan as if they were
+    # rooms, their names over real units and a stair, and a roof plan showed nothing but three of them. An area
+    # outline is a measurement drawn over rooms, not a room: Revit writes one from an area plan as an IfcSpace
+    # with its property set "Other" reading Category "Areas", and IFC4 says one with PredefinedType GFA.
+    m = models.rooms_and_area_outlines()
+    n = ids(m)
+    for view, how in (("plan", {"storey": "Level 1"}), ("section", {"line": "1000, 3000, 11000, 3000"})):
+        out = D.draw(m, str(tmp_path / view), view=view, **how)
+        root = svg_of(out)
+        assert sorted(p.get("data-id") for p in paths(root, "room")) == sorted([n["Unit 1"], n["Unit 2"]]), view
+        assert "GFA" not in texts(root), view
+        assert out["elements"]["rooms"] == 2, view
+        assert sorted((a["name"], a["why"]) for a in out["area_outlines_not_drawn"]) == [
+            ("FLOOR GFA", "Revit's Category: Areas"),
+            ("LEVEL GFA", "PredefinedType GFA"),
+        ], view
+
+
+def test_a_room_is_drawn_whatever_its_name(tmp_path):
+    # The test is what the model says a space IS, never its name: a room named like an area is still a room.
+    m = models.rooms_on_a_floor([("GFA storage", (0, 0, 6, 6))])
+    out = D.draw(m, str(tmp_path / "plan"), view="plan", storey="Level 1")
+    assert out["elements"]["rooms"] == 1
+    assert "area_outlines_not_drawn" not in out

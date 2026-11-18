@@ -518,7 +518,7 @@ def plan_set(
             "arguments": s["arguments"],
             "elements": o["elements"],
         }
-        for k in ("unlabelled_rooms", "notes"):
+        for k in ("unlabelled_rooms", "area_outlines_not_drawn", "notes"):
             if o.get(k):
                 entry[k] = o[k]
         listed.append(entry)
